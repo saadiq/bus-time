@@ -1,3 +1,4 @@
+// src/app/page.tsx
 import BusTracker from '@/components/BusTracker'
 
 export default function Home() {
