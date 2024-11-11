@@ -6,21 +6,21 @@ import React, { useState, useEffect } from 'react';
 interface BusArrival {
   vehicleId: string;
   originArrival: Date;
+  stopsAway: number;
   destinationArrival: Date | null;
-  distance: string;
-  onTime: string;
   destination: string;
 }
 
 interface BusData {
   originName: string;
   destinationName: string;
-  buses: any[]; // Type from API response
+  buses: BusResponse[];
 }
 
 interface BusResponse {
   vehicleRef: string;
   originArrival: string;
+  originStopsAway: number;
   destinationArrival: string | null;
   proximity: string;
   destination: string;
@@ -47,9 +47,8 @@ const BusTracker = () => {
         setArrivals(data.buses.map((bus: BusResponse) => ({
           vehicleId: bus.vehicleRef,
           originArrival: new Date(bus.originArrival),
+          stopsAway: bus.originStopsAway,
           destinationArrival: bus.destinationArrival ? new Date(bus.destinationArrival) : null,
-          distance: bus.proximity,
-          onTime: bus.proximity || 'On Time',
           destination: bus.destination
         })));
         setError(null);
@@ -115,7 +114,9 @@ const BusTracker = () => {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <span className="text-blue-500">🚌</span>
-                    <span className="text-sm text-gray-500">{bus.onTime}</span>
+                    <span className="text-sm text-gray-500">
+                      {bus.stopsAway === 0 ? 'approaching' : `${bus.stopsAway} stops away`}
+                    </span>
                   </div>
                 </div>
                 
@@ -123,7 +124,7 @@ const BusTracker = () => {
                   <div className="flex-1">
                     <div className="text-sm text-gray-500">{data?.originName}</div>
                     <div className="font-medium text-lg text-black">
-                      {getMinutesUntil(bus.originArrival)}
+                      in {getMinutesUntil(bus.originArrival)}
                     </div>
                   </div>
                   
@@ -131,7 +132,7 @@ const BusTracker = () => {
                   
                   <div className="flex-1 text-right">
                     <div className="text-sm text-gray-500">{data?.destinationName}</div>
-                    <div className="font-medium text-lg text-black">{formatTime(bus.destinationArrival)}</div>
+                    <div className="font-medium text-lg text-black">@ {formatTime(bus.destinationArrival)}</div>
                   </div>
                 </div>
               </div>

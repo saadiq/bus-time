@@ -6,6 +6,45 @@ const ORIGIN_STOP_ID = 'MTA_304213'; // Gates-Bedford
 const DESTINATION_STOP_ID = 'MTA_302434'; // Jorelmon-Court
 const LINE_REF = 'MTA NYCT_B52';
 
+interface MonitoredCall {
+  ExpectedArrivalTime: string;
+  NumberOfStopsAway: number;
+  ArrivalProximityText: string;
+}
+
+interface MonitoredVehicleJourney {
+  VehicleRef: string;
+  MonitoredCall: MonitoredCall;
+  DestinationName: string[];
+}
+
+interface MonitoredStopVisit {
+  MonitoredVehicleJourney: MonitoredVehicleJourney;
+}
+
+interface StopMonitoringDelivery {
+  MonitoredStopVisit: MonitoredStopVisit[];
+}
+
+interface ServiceDelivery {
+  StopMonitoringDelivery: StopMonitoringDelivery[];
+}
+
+interface SiriResponse {
+  Siri: {
+    ServiceDelivery: ServiceDelivery;
+  };
+}
+
+interface FormattedBus {
+  originArrival: string;
+  originStopsAway: number;
+  destinationArrival: string | null;
+  destination: string;
+  proximity: string;
+  vehicleRef: string;
+}
+
 export async function GET() {
   try {
     console.log('Starting bus times fetch...');
@@ -39,8 +78,8 @@ export async function GET() {
       throw new Error(`Failed to fetch bus data - Origin: ${originResponse.status}, Destination: ${destinationResponse.status}`);
     }
 
-    const originData = await originResponse.json();
-    const destinationData = await destinationResponse.json();
+    const originData = await originResponse.json() as SiriResponse;
+    const destinationData = await destinationResponse.json() as SiriResponse;
 
     // Extract MonitoredStopVisit arrays (or empty arrays if not present)
     const response = {
@@ -58,21 +97,21 @@ export async function GET() {
     const formattedResponse = {
       originName: 'Gates / Bedford',
       destinationName: 'Joralemon / Court',
-      buses: response.origin.map((visit: any) => {
+      buses: response.origin.map((visit: MonitoredStopVisit) => {
         const vehicleRef = visit.MonitoredVehicleJourney.VehicleRef;
-        const destinationVisit = response.destination.find((destVisit: any) => 
+        const destinationVisit = response.destination.find((destVisit: MonitoredStopVisit) => 
           destVisit.MonitoredVehicleJourney.VehicleRef === vehicleRef
         );
 
         return {
           originArrival: visit.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime,
           originStopsAway: visit.MonitoredVehicleJourney.MonitoredCall.NumberOfStopsAway,
-          destinationArrival: destinationVisit?.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime,
+          destinationArrival: destinationVisit?.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime || null,
           destination: visit.MonitoredVehicleJourney.DestinationName[0],
           proximity: visit.MonitoredVehicleJourney.MonitoredCall.ArrivalProximityText,
-          vehicleRef: vehicleRef
+          vehicleRef
         };
-      }).filter((bus: { destinationArrival: string }) => bus.destinationArrival) // Only include buses with both arrival times
+      }).filter((bus: FormattedBus) => bus.destinationArrival) // Only include buses with both arrival times
     };
 
     console.log('Successfully processed bus times data');
