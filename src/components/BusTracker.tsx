@@ -27,6 +27,8 @@ interface BusResponse {
   destination: string;
 }
 
+const POLLING_INTERVAL = 30000; // 30 seconds
+
 const BusTracker = () => {
   const [arrivals, setArrivals] = useState<BusArrival[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +36,12 @@ const BusTracker = () => {
   const [data, setData] = useState<BusData | null>(null);
   const [cutoffTime, setCutoffTime] = useState('08:00');
   const [enableCutoff, setEnableCutoff] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [nextRefreshIn, setNextRefreshIn] = useState<number>(POLLING_INTERVAL / 1000);
+
+  useEffect(() => {
+    setLastRefresh(new Date());
+  }, []);
 
   const getBusStatus = (arrivalTime: Date) => {
     if (!enableCutoff) return 'normal';
@@ -42,7 +50,7 @@ const BusTracker = () => {
     const cutoff = new Date(arrivalTime);
     cutoff.setHours(hours, minutes, 0, 0);
     
-    const warningThreshold = new Date(cutoff.getTime() - 15 * 60000);
+    const warningThreshold = new Date(cutoff.getTime() - 20 * 60000); // 20 minutes before
     
     if (arrivalTime > cutoff) {
       return 'late';
@@ -75,6 +83,7 @@ const BusTracker = () => {
           destination: bus.destination
         })));
         setError(null);
+        setLastRefresh(new Date());
       } catch (err) {
         setError('Unable to load bus arrival times. Please try again later.');
         console.error('Error fetching bus data:', err);
@@ -84,9 +93,20 @@ const BusTracker = () => {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 30000);
+    const interval = setInterval(fetchData, POLLING_INTERVAL);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!lastRefresh) return;
+      const timeSinceLastRefresh = Date.now() - lastRefresh.getTime();
+      const remainingSeconds = Math.max(0, Math.ceil((POLLING_INTERVAL - timeSinceLastRefresh) / 1000));
+      setNextRefreshIn(remainingSeconds);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [lastRefresh]);
 
   const formatTime = (date: Date | null) => {
     if (!date) return 'N/A';
@@ -139,6 +159,11 @@ const BusTracker = () => {
       </div>
 
       <div className="p-6">
+        <div className="text-sm text-gray-500 mb-4 flex justify-between items-center">
+          <span>Last updated: {lastRefresh?.toLocaleTimeString() || 'Loading...'}</span>
+          <span>Auto-refreshes in {nextRefreshIn} seconds</span>
+        </div>
+
         {loading && (
           <div className="text-center py-4">Loading arrival times...</div>
         )}
