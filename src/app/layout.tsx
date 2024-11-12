@@ -16,7 +16,7 @@ const geistMono = localFont({
 
 export const metadata: Metadata = {
   title: "B52 Bus Arrivals",
-  description: "B52 Bus Arrival information for Gates-Bedford > Jorelmon-Court",
+  description: "B52 Bus Arrival information for Gates-Bedford → Jorelmon-Court",
 };
 
 export default function RootLayout({
