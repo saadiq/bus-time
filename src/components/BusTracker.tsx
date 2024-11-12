@@ -120,7 +120,7 @@ const BusTracker = () => {
   const getMinutesUntil = (date: Date | null) => {
     if (!date) return 'N/A';
     const diff = date.getTime() - new Date().getTime();
-    const minutes = Math.round(diff / 60000);
+    const minutes = Math.floor(diff / 60000);
     return `${minutes} min`;
   };
 
