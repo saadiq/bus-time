@@ -160,8 +160,8 @@ const BusTracker = () => {
 
       <div className="p-6">
         <div className="text-sm text-gray-500 mb-4 flex justify-between items-center">
-          <span>Last updated: {lastRefresh?.toLocaleTimeString() || 'Loading...'}</span>
-          <span>Auto-refreshes in {nextRefreshIn} seconds</span>
+          <span>Last: {lastRefresh?.toLocaleTimeString() || 'Loading...'}</span>
+          <span>Refresh in {nextRefreshIn} secs</span>
         </div>
 
         {loading && (
