@@ -204,7 +204,7 @@ const BusTracker = () => {
                     <div className="flex-1">
                       <div className="text-sm text-gray-500">{data?.originName}</div>
                       <div className="font-medium text-lg text-black">
-                        in {getMinutesUntil(bus.destinationArrival)}
+                        in {getMinutesUntil(bus.originArrival)}
                       </div>
                     </div>
                     
