@@ -38,15 +38,6 @@ interface SiriResponse {
   };
 }
 
-interface FormattedBus {
-  originArrival: string;
-  originStopsAway: number;
-  destinationArrival: string | null;
-  destination: string;
-  proximity: string;
-  vehicleRef: string;
-}
-
 export async function GET() {
   try {
     console.log('Starting bus times fetch...');
