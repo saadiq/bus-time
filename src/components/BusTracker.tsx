@@ -192,22 +192,16 @@ const BusTracker = () => {
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2">
                       <span className="text-blue-500">🚌</span>
-                      <span className={`text-sm ${
-                        status === 'late' ? 'text-red-500' :
-                        status === 'warning' ? 'text-yellow-600' :
-                        'text-gray-500'
-                      }`}>
-                        {bus.stopsAway === 0 ? 'approaching' : `${bus.stopsAway} stops away`}
-                      </span>
-                    </div>
-                    
-                    <div className="flex items-center gap-4">
                       <div className="font-semibold text-gray-900">
                         {(() => {
                           const minutes = getMinutesUntil(bus.originArrival);
                           return minutes === 'NOW' ? 'NOW' : `in ${minutes} min`;
                         })()}
                       </div>
+                      <span className="text-sm text-gray-500">({bus.stopsAway} stops away)</span>
+                    </div>
+                    
+                    <div className="flex items-center gap-4">
                       <div className="text-gray-400">→</div>
                       <div className="font-medium text-gray-600">
                         @ {formatTime(bus.destinationArrival)}
