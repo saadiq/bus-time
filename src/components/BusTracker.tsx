@@ -121,7 +121,7 @@ const BusTracker = () => {
     if (!date) return 'N/A';
     const diff = date.getTime() - new Date().getTime();
     const minutes = Math.floor(diff / 60000);
-    return `${minutes} min`;
+    return minutes < 1 ? 'NOW' : minutes;
   };
 
   return (
@@ -189,30 +189,29 @@ const BusTracker = () => {
                     'bg-gray-50'
                   }`}
                 >
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-blue-500">🚌</span>
-                    <span className={`text-sm ${
-                      status === 'late' ? 'text-red-500' :
-                      status === 'warning' ? 'text-yellow-600' :
-                      'text-gray-500'
-                    }`}>
-                      {bus.stopsAway === 0 ? 'approaching' : `${bus.stopsAway} stops away`}
-                    </span>
-                  </div>
-                  
                   <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="text-sm text-gray-500">{data?.originName}</div>
-                      <div className="font-medium text-lg text-black">
-                        in {getMinutesUntil(bus.originArrival)}
-                      </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-blue-500">🚌</span>
+                      <span className={`text-sm ${
+                        status === 'late' ? 'text-red-500' :
+                        status === 'warning' ? 'text-yellow-600' :
+                        'text-gray-500'
+                      }`}>
+                        {bus.stopsAway === 0 ? 'approaching' : `${bus.stopsAway} stops away`}
+                      </span>
                     </div>
                     
-                    <div className="text-gray-400">→</div>
-                    
-                    <div className="flex-1 text-right">
-                      <div className="text-sm text-gray-500">{data?.destinationName}</div>
-                      <div className="font-medium text-lg text-black">@ {formatTime(bus.destinationArrival)}</div>
+                    <div className="flex items-center gap-4">
+                      <div className="font-semibold text-gray-900">
+                        {(() => {
+                          const minutes = getMinutesUntil(bus.originArrival);
+                          return minutes === 'NOW' ? 'NOW' : `in ${minutes} min`;
+                        })()}
+                      </div>
+                      <div className="text-gray-400">→</div>
+                      <div className="font-medium text-gray-600">
+                        @ {formatTime(bus.destinationArrival)}
+                      </div>
                     </div>
                   </div>
                 </div>
