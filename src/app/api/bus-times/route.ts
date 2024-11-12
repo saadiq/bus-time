@@ -10,6 +10,7 @@ interface MonitoredCall {
   ExpectedArrivalTime: string;
   NumberOfStopsAway: number;
   ArrivalProximityText: string;
+  AimedArrivalTime: string;
 }
 
 interface MonitoredVehicleJourney {
@@ -78,39 +79,43 @@ export async function GET() {
     const originData = await originResponse.json() as SiriResponse;
     const destinationData = await destinationResponse.json() as SiriResponse;
 
-    // Extract MonitoredStopVisit arrays (or empty arrays if not present)
-    const response = {
-      origin: originData?.Siri?.ServiceDelivery?.StopMonitoringDelivery?.[0]?.MonitoredStopVisit || [],
-      destination: destinationData?.Siri?.ServiceDelivery?.StopMonitoringDelivery?.[0]?.MonitoredStopVisit || []
-    };
+    const originStopVisits = originData?.Siri?.ServiceDelivery?.StopMonitoringDelivery?.[0]?.MonitoredStopVisit || [];
+    const destinationStopVisits = destinationData?.Siri?.ServiceDelivery?.StopMonitoringDelivery?.[0]?.MonitoredStopVisit || [];
 
-    // Log the number of buses found for debugging
-    console.log('Buses found:', {
-      origin: response.origin.length,
-      destination: response.destination.length
+    console.log('Buses found - Origin:', originStopVisits.length, 'Destination:', destinationStopVisits.length);
+
+    // Create a map of vehicle refs to destination arrival times
+    const destinationArrivals = new Map(
+      destinationStopVisits.map((visit: MonitoredStopVisit) => [
+        visit.MonitoredVehicleJourney.VehicleRef,
+        visit.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime
+      ])
+    );
+
+    // Log each bus being processed
+    originStopVisits.forEach((visit: MonitoredStopVisit) => {
+      console.log('Processing bus:', {
+        vehicleRef: visit.MonitoredVehicleJourney.VehicleRef,
+        originArrival: visit.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime,
+        hasDestinationTime: destinationArrivals.has(visit.MonitoredVehicleJourney.VehicleRef)
+      });
     });
 
-    // Extract vehicle journeys and match them by vehicle ID
     const formattedResponse = {
       originName: 'Gates / Bedford',
       destinationName: 'Joralemon / Court',
-      buses: response.origin.map((visit: MonitoredStopVisit) => {
-        const vehicleRef = visit.MonitoredVehicleJourney.VehicleRef;
-        const destinationVisit = response.destination.find((destVisit: MonitoredStopVisit) => 
-          destVisit.MonitoredVehicleJourney.VehicleRef === vehicleRef
-        );
-
-        return {
-          originArrival: visit.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime,
-          originStopsAway: visit.MonitoredVehicleJourney.MonitoredCall.NumberOfStopsAway,
-          destinationArrival: destinationVisit?.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime || null,
-          destination: visit.MonitoredVehicleJourney.DestinationName[0],
-          proximity: visit.MonitoredVehicleJourney.MonitoredCall.ArrivalProximityText,
-          vehicleRef
-        };
-      }).filter((bus: FormattedBus) => bus.destinationArrival) // Only include buses with both arrival times
+      buses: originStopVisits.map((visit: MonitoredStopVisit) => ({
+        originArrival: visit.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime || 
+                      visit.MonitoredVehicleJourney.MonitoredCall.AimedArrivalTime, // fallback to AimedArrivalTime
+        originStopsAway: visit.MonitoredVehicleJourney.MonitoredCall.NumberOfStopsAway,
+        destination: visit.MonitoredVehicleJourney.DestinationName[0],
+        proximity: visit.MonitoredVehicleJourney.MonitoredCall.ArrivalProximityText,
+        vehicleRef: visit.MonitoredVehicleJourney.VehicleRef,
+        destinationArrival: destinationArrivals.get(visit.MonitoredVehicleJourney.VehicleRef) || null
+      }))
     };
 
+    console.log('Final bus count:', formattedResponse.buses.length);
     console.log('Successfully processed bus times data');
     return NextResponse.json(formattedResponse);
   } catch (error) {
