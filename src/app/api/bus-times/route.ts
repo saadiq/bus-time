@@ -74,8 +74,6 @@ export async function GET() {
     const originStopVisits = originData?.Siri?.ServiceDelivery?.StopMonitoringDelivery?.[0]?.MonitoredStopVisit || [];
     const destinationStopVisits = destinationData?.Siri?.ServiceDelivery?.StopMonitoringDelivery?.[0]?.MonitoredStopVisit || [];
 
-    console.log('Buses found - Origin:', originStopVisits.length, 'Destination:', destinationStopVisits.length);
-
     // Create a map of vehicle refs to destination arrival times
     const destinationArrivals = new Map(
       destinationStopVisits.map((visit: MonitoredStopVisit) => [
@@ -83,15 +81,6 @@ export async function GET() {
         visit.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime
       ])
     );
-
-    // // Log each bus being processed
-    // originStopVisits.forEach((visit: MonitoredStopVisit) => {
-    //   console.log('Processing bus:', {
-    //     vehicleRef: visit.MonitoredVehicleJourney.VehicleRef,
-    //     originArrival: visit.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime,
-    //     hasDestinationTime: destinationArrivals.has(visit.MonitoredVehicleJourney.VehicleRef)
-    //   });
-    // });
 
     const formattedResponse = {
       originName: 'Gates / Bedford',
