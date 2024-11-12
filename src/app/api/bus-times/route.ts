@@ -71,9 +71,6 @@ export async function GET() {
       fetch(destinationUrl)
     ]);
 
-    console.log('Origin Response Status:', originResponse.status);
-    console.log('Destination Response Status:', destinationResponse.status);
-
     if (!originResponse.ok || !destinationResponse.ok) {
       throw new Error(`Failed to fetch bus data - Origin: ${originResponse.status}, Destination: ${destinationResponse.status}`);
     }
