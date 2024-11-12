@@ -84,14 +84,14 @@ export async function GET() {
       ])
     );
 
-    // Log each bus being processed
-    originStopVisits.forEach((visit: MonitoredStopVisit) => {
-      console.log('Processing bus:', {
-        vehicleRef: visit.MonitoredVehicleJourney.VehicleRef,
-        originArrival: visit.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime,
-        hasDestinationTime: destinationArrivals.has(visit.MonitoredVehicleJourney.VehicleRef)
-      });
-    });
+    // // Log each bus being processed
+    // originStopVisits.forEach((visit: MonitoredStopVisit) => {
+    //   console.log('Processing bus:', {
+    //     vehicleRef: visit.MonitoredVehicleJourney.VehicleRef,
+    //     originArrival: visit.MonitoredVehicleJourney.MonitoredCall.ExpectedArrivalTime,
+    //     hasDestinationTime: destinationArrivals.has(visit.MonitoredVehicleJourney.VehicleRef)
+    //   });
+    // });
 
     const formattedResponse = {
       originName: 'Gates / Bedford',
