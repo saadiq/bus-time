@@ -195,7 +195,7 @@ const BusTracker = () => {
                       <div className="font-semibold text-gray-900">
                         {(() => {
                           const minutes = getMinutesUntil(bus.originArrival);
-                          return minutes === 'NOW' ? 'NOW' : `in ${minutes} min`;
+                          return minutes === 'NOW' ? 'NOW' : `${minutes} min`;
                         })()}
                       </div>
                       <span className="text-sm text-gray-500">({bus.stopsAway} stops away)</span>
