@@ -178,8 +178,10 @@ const BusTracker = () => {
         
         {!loading && !error && arrivals.length > 0 && (
           <div className="space-y-4">
-            {arrivals.map((bus) => {
-              const status = getBusStatus(bus.destinationArrival || new Date());
+            {arrivals.map((bus, index) => {
+              const previousStatus = index > 0 ? getBusStatus(arrivals[index - 1].destinationArrival || new Date()) : 'normal';
+              const status = bus.destinationArrival ? getBusStatus(bus.destinationArrival) : previousStatus;
+
               return (
                 <div
                   key={bus.vehicleId}
