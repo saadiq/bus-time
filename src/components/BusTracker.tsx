@@ -200,7 +200,9 @@ const BusTracker = () => {
                           return minutes === 'NOW' ? 'NOW' : `${minutes} min`;
                         })()}
                       </div>
-                      <span className="text-sm text-gray-500">({bus.stopsAway} stops away)</span>
+                      <span className="text-sm text-gray-500">
+                        {bus.stopsAway === 0 ? '(here)' : `(${bus.stopsAway} ${bus.stopsAway === 1 ? 'stop' : 'stops'} away)`}
+                      </span>
                     </div>
                     
                     <div className="flex items-center gap-4">
