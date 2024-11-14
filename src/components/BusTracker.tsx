@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Switch } from '@headlessui/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -29,7 +29,7 @@ interface BusResponse {
 
 const POLLING_INTERVAL = 30000; // 30 seconds
 
-const BusTracker = () => {
+const BusTrackerContent = () => {
   const router = useRouter();
   const query = useSearchParams();
 
@@ -181,15 +181,23 @@ const BusTracker = () => {
         {!loading && !error && arrivals.length === 0 && <div className="text-center py-4">No buses currently scheduled</div>}
         {!loading && !error && arrivals.length > 0 && (
           <div className="space-y-4">
-            {arrivals.map((bus) => {
-              const status = bus.destinationArrival ? getBusStatus(bus.destinationArrival) : 'normal';
+            {arrivals.map((bus, index) => {
+              const previousStatus = index > 0 ? getBusStatus(arrivals[index - 1].destinationArrival || new Date()) : 'normal';
+              const status = bus.destinationArrival ? getBusStatus(bus.destinationArrival) : previousStatus;
               return (
                 <div key={bus.vehicleId} className={`p-4 rounded-lg ${status === 'late' ? 'bg-red-50' : status === 'warning' ? 'bg-yellow-50' : 'bg-gray-50'}`}>
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2">
                       <span className="text-blue-500">🚌</span>
-                      <div className="font-semibold text-gray-900">{getMinutesUntil(bus.originArrival)} min</div>
-                      <span className="text-sm text-gray-500">{bus.stopsAway === 0 ? '(here)' : `(${bus.stopsAway} stops away)`}</span>
+                      <div className="font-semibold text-gray-900">
+                        {(() => {
+                          const minutes = getMinutesUntil(bus.originArrival);
+                          return minutes === 'NOW' ? 'NOW' : `${minutes} min`;
+                        })()}
+                      </div>
+                      <span className="text-sm text-gray-500">
+                        {bus.stopsAway === 0 ? '(here)' : `(${bus.stopsAway} ${bus.stopsAway === 1 ? 'stop' : 'stops'} away)`}
+                      </span>                    
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-gray-400">→</div>
@@ -203,6 +211,14 @@ const BusTracker = () => {
         )}
       </div>
     </div>
+  );
+};
+
+const BusTracker = () => {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <BusTrackerContent />
+    </Suspense>
   );
 };
 
