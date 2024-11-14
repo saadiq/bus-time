@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 
 const MTA_API_BASE = 'https://bustime.mta.info/api/siri/stop-monitoring.json';
 const ORIGIN_STOP_ID = 'MTA_304213'; // Gates-Bedford
-const DESTINATION_STOP_ID = 'MTA_302434'; // Jorelmon-Court
+const DESTINATION_STOP_ID = 'MTA_302434'; // Joralemon-Court
 const LINE_REF = 'MTA NYCT_B52';
 
 interface MonitoredCall {
@@ -83,8 +83,8 @@ export async function GET() {
     );
 
     const formattedResponse = {
-      originName: 'Gates / Bedford',
-      destinationName: 'Joralemon / Court',
+      originName: 'Home',
+      destinationName: 'School',
       buses: originStopVisits
         .filter((visit: MonitoredStopVisit) => 
           !visit.MonitoredVehicleJourney.ProgressStatus)

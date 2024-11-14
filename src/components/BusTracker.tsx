@@ -146,7 +146,7 @@ const BusTrackerContent = () => {
     <div className="max-w-lg mx-auto bg-white rounded-lg shadow-md">
       <div className="bg-blue-500 text-white p-6 rounded-t-lg">
         <h1 className="text-2xl font-bold flex items-center gap-2">
-          🚍 B52 to School
+          🚍 Morning Commute
         </h1>
         <div className="text-sm mt-1">
           📍 {data?.originName} → {data?.destinationName}
