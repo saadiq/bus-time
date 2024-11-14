@@ -1,8 +1,8 @@
-// src/components/BusTracker.tsx
 "use client";
 
 import React, { useState, useEffect } from 'react';
 import { Switch } from '@headlessui/react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 interface BusArrival {
   vehicleId: string;
@@ -30,6 +30,9 @@ interface BusResponse {
 const POLLING_INTERVAL = 30000; // 30 seconds
 
 const BusTracker = () => {
+  const router = useRouter();
+  const query = useSearchParams();
+
   const [arrivals, setArrivals] = useState<BusArrival[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,6 +46,30 @@ const BusTracker = () => {
     setLastRefresh(new Date());
   }, []);
 
+  useEffect(() => {
+    if (query.get('cutoff') === 'true') {
+      setEnableCutoff(true);
+      const timeQuery = query.get('time');
+      setCutoffTime(timeQuery || '08:00');
+    }
+  }, [query]);
+
+  const handleCutoffChange = (value: boolean) => {
+    setEnableCutoff(value);
+    if (value) {
+      router.replace(`?cutoff=true&time=${cutoffTime}`);
+    } else {
+      router.replace('/');
+    }
+  };
+
+  const handleCutoffTimeChange = (time: string) => {
+    setCutoffTime(time);
+    if (enableCutoff) {
+      router.replace(`?cutoff=true&time=${time}`);
+    }
+  };
+
   const getBusStatus = (arrivalTime: Date) => {
     if (!enableCutoff) return 'normal';
     
@@ -52,14 +79,8 @@ const BusTracker = () => {
     
     const warningThreshold = new Date(cutoff.getTime() - 20 * 60000); // 20 minutes before
     
-    if (arrivalTime > cutoff) {
-      return 'late';
-    }
-    
-    if (arrivalTime >= warningThreshold) {
-      return 'warning';
-    }
-    
+    if (arrivalTime > cutoff) return 'late';
+    if (arrivalTime >= warningThreshold) return 'warning';
     return 'normal';
   };
 
@@ -68,10 +89,7 @@ const BusTracker = () => {
       try {
         setLoading(true);
         const response = await fetch('/api/bus-times');
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch bus data');
-        }
+        if (!response.ok) throw new Error('Failed to fetch bus data');
 
         const data = await response.json();
         setData(data);
@@ -80,7 +98,7 @@ const BusTracker = () => {
           originArrival: new Date(bus.originArrival),
           stopsAway: bus.originStopsAway,
           destinationArrival: bus.destinationArrival ? new Date(bus.destinationArrival) : null,
-          destination: bus.destination
+          destination: bus.destination,
         })));
         setError(null);
         setLastRefresh(new Date());
@@ -113,7 +131,7 @@ const BusTracker = () => {
     return date.toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',
-      hour12: true
+      hour12: true,
     });
   };
 
@@ -137,79 +155,45 @@ const BusTracker = () => {
           <div className="flex items-center gap-2">
             <Switch
               checked={enableCutoff}
-              onChange={setEnableCutoff}
-              className={`${
-                enableCutoff ? 'bg-blue-700' : 'bg-blue-400'
-              } relative inline-flex h-6 w-11 items-center rounded-full transition-colors`}
+              onChange={handleCutoffChange}
+              className={`${enableCutoff ? 'bg-blue-700' : 'bg-blue-400'} relative inline-flex h-6 w-11 items-center rounded-full transition-colors`}
             >
-              <span className={`${
-                enableCutoff ? 'translate-x-6' : 'translate-x-1'
-              } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`} />
+              <span className={`${enableCutoff ? 'translate-x-6' : 'translate-x-1'} inline-block h-4 w-4 transform rounded-full bg-white transition-transform`} />
             </Switch>
             <span className="text-sm">Check arrival times</span>
           </div>
           <input
             type="time"
             value={cutoffTime}
-            onChange={(e) => setCutoffTime(e.target.value)}
+            onChange={(e) => handleCutoffTimeChange(e.target.value)}
             className="bg-blue-400 rounded px-2 py-1 text-sm"
             disabled={!enableCutoff}
           />
         </div>
       </div>
-
       <div className="p-6">
         <div className="text-sm text-gray-500 mb-4 flex justify-between items-center">
           <span>Last: {lastRefresh?.toLocaleTimeString() || 'Loading...'}</span>
           <span>Refresh in {nextRefreshIn} secs</span>
         </div>
-
-        {loading && (
-          <div className="text-center py-4">Loading arrival times...</div>
-        )}
-        
-        {error && (
-          <div className="text-red-500 text-center py-4">{error}</div>
-        )}
-        
-        {!loading && !error && arrivals.length === 0 && (
-          <div className="text-center py-4">No buses currently scheduled</div>
-        )}
-        
+        {loading && <div className="text-center py-4">Loading arrival times...</div>}
+        {error && <div className="text-red-500 text-center py-4">{error}</div>}
+        {!loading && !error && arrivals.length === 0 && <div className="text-center py-4">No buses currently scheduled</div>}
         {!loading && !error && arrivals.length > 0 && (
           <div className="space-y-4">
-            {arrivals.map((bus, index) => {
-              const previousStatus = index > 0 ? getBusStatus(arrivals[index - 1].destinationArrival || new Date()) : 'normal';
-              const status = bus.destinationArrival ? getBusStatus(bus.destinationArrival) : previousStatus;
-
+            {arrivals.map((bus) => {
+              const status = bus.destinationArrival ? getBusStatus(bus.destinationArrival) : 'normal';
               return (
-                <div
-                  key={bus.vehicleId}
-                  className={`p-4 rounded-lg ${
-                    status === 'late' ? 'bg-red-50' :
-                    status === 'warning' ? 'bg-yellow-50' :
-                    'bg-gray-50'
-                  }`}
-                >
+                <div key={bus.vehicleId} className={`p-4 rounded-lg ${status === 'late' ? 'bg-red-50' : status === 'warning' ? 'bg-yellow-50' : 'bg-gray-50'}`}>
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2">
                       <span className="text-blue-500">🚌</span>
-                      <div className="font-semibold text-gray-900">
-                        {(() => {
-                          const minutes = getMinutesUntil(bus.originArrival);
-                          return minutes === 'NOW' ? 'NOW' : `${minutes} min`;
-                        })()}
-                      </div>
-                      <span className="text-sm text-gray-500">
-                        {bus.stopsAway === 0 ? '(here)' : `(${bus.stopsAway} ${bus.stopsAway === 1 ? 'stop' : 'stops'} away)`}
-                      </span>
+                      <div className="font-semibold text-gray-900">{getMinutesUntil(bus.originArrival)} min</div>
+                      <span className="text-sm text-gray-500">{bus.stopsAway === 0 ? '(here)' : `(${bus.stopsAway} stops away)`}</span>
                     </div>
-                    
                     <div className="flex items-center gap-4">
                       <div className="text-gray-400">→</div>
-                      <div className="font-medium text-gray-600">
-                        @ {formatTime(bus.destinationArrival)}
-                      </div>
+                      <div className="font-medium text-gray-600">@ {formatTime(bus.destinationArrival)}</div>
                     </div>
                   </div>
                 </div>
