@@ -39,10 +39,7 @@ interface SiriResponse {
 }
 
 export async function GET() {
-  try {
-    console.log('Starting bus times fetch...');
-    
-    // Add additional required parameters
+  try {    
     const params = new URLSearchParams({
       key: process.env.MTA_API_KEY || '',
       version: '2',
@@ -54,9 +51,6 @@ export async function GET() {
     // Construct URLs with all parameters
     const originUrl = `${MTA_API_BASE}?${params}&MonitoringRef=${ORIGIN_STOP_ID}&LineRef=${LINE_REF}`;
     const destinationUrl = `${MTA_API_BASE}?${params}&MonitoringRef=${DESTINATION_STOP_ID}&LineRef=${LINE_REF}`;
-    
-    console.log('Origin URL:', originUrl);
-    console.log('Destination URL:', destinationUrl);
     
     // Fetch data for both stops in parallel
     const [originResponse, destinationResponse] = await Promise.all([
@@ -99,8 +93,6 @@ export async function GET() {
         }))
     };
 
-    console.log('Final bus count:', formattedResponse.buses.length);
-    console.log('Successfully processed bus times data');
     return NextResponse.json(formattedResponse);
   } catch (error) {
     console.error('Error fetching bus data:', error);
