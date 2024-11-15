@@ -182,7 +182,10 @@ const BusTrackerContent = () => {
         {!loading && !error && arrivals.length > 0 && (
           <div className="space-y-4">
             {arrivals.map((bus, index) => {
-              const previousStatus = index > 0 ? getBusStatus(arrivals[index - 1].destinationArrival || new Date()) : 'normal';
+              const previousBus = arrivals.slice(0, index).reverse().find(b => b.destinationArrival);
+              const previousStatus = previousBus && previousBus.destinationArrival 
+                ? getBusStatus(previousBus.destinationArrival) 
+                : 'normal';
               const status = bus.destinationArrival ? getBusStatus(bus.destinationArrival) : previousStatus;
               return (
                 <div key={bus.vehicleId} className={`p-4 rounded-lg ${status === 'late' ? 'bg-red-50' : status === 'warning' ? 'bg-yellow-50' : 'bg-gray-50'}`}>
