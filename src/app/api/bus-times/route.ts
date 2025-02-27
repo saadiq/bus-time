@@ -228,19 +228,6 @@ export async function GET(request: NextRequest) {
     
     const data = await response.json() as SiriResponse;
     
-    // Enhanced debugging: Log more details about API response structure
-    console.log('API response detailed structure:', {
-      hasSiri: !!data.Siri,
-      hasServiceDelivery: !!(data.Siri && data.Siri.ServiceDelivery),
-      hasStopMonitoring: !!(data.Siri && data.Siri.ServiceDelivery && data.Siri.ServiceDelivery.StopMonitoringDelivery),
-      monitoringDeliveryLength: data.Siri?.ServiceDelivery?.StopMonitoringDelivery?.length || 0,
-      responseType: typeof data,
-      responseKeysCount: Object.keys(data).length
-    });
-    
-    // DEBUG: Print the full raw API response for troubleshooting
-    console.log('FULL API RESPONSE:', JSON.stringify(data).substring(0, 1000) + '...');
-    
     // Extract bus arrivals from the response
     const deliveries = data.Siri?.ServiceDelivery?.StopMonitoringDelivery || [];
     
@@ -254,7 +241,7 @@ export async function GET(request: NextRequest) {
     }
     
     const visits = deliveries[0].MonitoredStopVisit;
-    console.log(`Found ${visits.length} total bus visits, filtering for line ${busLine}`);
+    console.log(`Found ${visits.length} total bus visits for line ${busLine}`);
     
     // Filter buses by line and exclude those with ProgressStatus
     const filteredVisits = visits.filter(visit => {
@@ -266,31 +253,6 @@ export async function GET(request: NextRequest) {
       
       return correctRoute && inService;
     });
-    
-    console.log(`After filtering, found ${filteredVisits.length} valid buses`);
-    
-    // Sample the first bus to help debug
-    if (filteredVisits.length > 0) {
-      const sampleBus = filteredVisits[0].MonitoredVehicleJourney;
-      console.log('Sample bus data:', {
-        vehicleRef: sampleBus.VehicleRef,
-        lineRef: sampleBus.LineRef,
-        destinationName: sampleBus.DestinationName,
-        hasMonitoredCall: !!sampleBus.MonitoredCall,
-        monitoredCall: sampleBus.MonitoredCall,
-        stopsAway: sampleBus.MonitoredCall?.NumberOfStopsAway,
-        stopsAwayType: sampleBus.MonitoredCall?.NumberOfStopsAway !== undefined ? 
-          typeof sampleBus.MonitoredCall.NumberOfStopsAway : 'undefined',
-        // Log Extensions.Distances to see if stops away is there
-        extensions: sampleBus.MonitoredCall?.Extensions,
-        distances: sampleBus.MonitoredCall?.Extensions?.Distances,
-        stopsFromCall: sampleBus.MonitoredCall?.Extensions?.Distances?.StopsFromCall,
-        distanceFromCall: sampleBus.MonitoredCall?.Extensions?.Distances?.DistanceFromCall,
-        presentableDistance: sampleBus.MonitoredCall?.Extensions?.Distances?.PresentableDistance,
-        monitoredCallFields: sampleBus.MonitoredCall ? Object.keys(sampleBus.MonitoredCall) : [],
-        monitoredCallStructure: JSON.stringify(sampleBus.MonitoredCall).substring(0, 200)
-      });
-    }
     
     // Process each bus arrival
     const buses: BusResponse[] = filteredVisits.map((visit) => {
@@ -308,7 +270,6 @@ export async function GET(request: NextRequest) {
           originArrivalDate = new Date(originArrival);
           if (!isNaN(originArrivalDate.getTime())) {
             formattedOriginArrival = originArrivalDate.toISOString();
-            console.log(`Bus ${vehicleRef} origin arrival time: ${formattedOriginArrival}`);
           } else {
             console.warn(`Invalid origin arrival time format for bus ${vehicleRef}: ${originArrival}`);
           }
@@ -325,13 +286,11 @@ export async function GET(request: NextRequest) {
         try {
           if (typeof journey.MonitoredCall.NumberOfStopsAway === 'number') {
             originStopsAway = journey.MonitoredCall.NumberOfStopsAway;
-            console.log(`Bus ${vehicleRef} has NumberOfStopsAway as number: ${originStopsAway}`);
           } else {
             originStopsAway = parseInt(journey.MonitoredCall.NumberOfStopsAway as any, 10);
-            console.log(`Bus ${vehicleRef} has NumberOfStopsAway parsed from non-number: ${originStopsAway}`);
           }
         } catch (e) {
-          console.warn(`Failed to parse NumberOfStopsAway for bus ${vehicleRef}`, e);
+          console.warn(`Failed to parse NumberOfStopsAway for bus ${vehicleRef}`);
         }
       } 
       // Then check Extensions.Distances.StopsFromCall field
@@ -339,74 +298,41 @@ export async function GET(request: NextRequest) {
         try {
           if (typeof journey.MonitoredCall.Extensions.Distances.StopsFromCall === 'number') {
             originStopsAway = journey.MonitoredCall.Extensions.Distances.StopsFromCall;
-            console.log(`Bus ${vehicleRef} has StopsFromCall as number: ${originStopsAway}`);
           } else {
             originStopsAway = parseInt(journey.MonitoredCall.Extensions.Distances.StopsFromCall as any, 10);
-            console.log(`Bus ${vehicleRef} has StopsFromCall parsed from non-number: ${originStopsAway}`);
           }
         } catch (e) {
-          console.warn(`Failed to parse StopsFromCall for bus ${vehicleRef}`, e);
+          console.warn(`Failed to parse StopsFromCall for bus ${vehicleRef}`);
         }
       }
       // Try to extract from PresentableDistance (e.g. "2 stops away")
       else if (journey.MonitoredCall?.Extensions?.Distances?.PresentableDistance) {
         const presentable = journey.MonitoredCall.Extensions.Distances.PresentableDistance;
-        console.log(`Bus ${vehicleRef} has PresentableDistance: ${presentable}`);
         
         // Try to extract a number from the presentable distance (e.g. "2 stops away")
         const match = presentable.match(/^(\d+)/);
         if (match && match[1]) {
           originStopsAway = parseInt(match[1], 10);
-          console.log(`Bus ${vehicleRef} extracted stops away from PresentableDistance: ${originStopsAway}`);
         } else if (presentable.toLowerCase().includes('at stop')) {
           originStopsAway = 0;
-          console.log(`Bus ${vehicleRef} is at stop based on PresentableDistance`);
         }
       }
-      
-      console.log(`Bus ${vehicleRef} final originStopsAway: ${originStopsAway}`);
       
       const destination = Array.isArray(journey.DestinationName) 
         ? journey.DestinationName[0] || 'Unknown'
         : journey.DestinationName || 'Unknown';
-      
-      // DEBUG: Log OnwardCalls information
-      if (journey.OnwardCalls?.OnwardCall) {
-        console.log(`Bus ${vehicleRef} has ${journey.OnwardCalls.OnwardCall.length} onward calls`);
-        console.log(`FULL ONWARD CALLS FOR BUS ${vehicleRef}:`, JSON.stringify(journey.OnwardCalls));
-        journey.OnwardCalls.OnwardCall.forEach((call, index) => {
-          console.log(`  Onward call ${index}: Stop ${call.StopPointRef}, Time: ${call.ExpectedArrivalTime}`);
-        });
-      } else {
-        console.log(`Bus ${vehicleRef} has no onward calls data. Full journey:`, JSON.stringify(journey).substring(0, 500) + '...');
-      }
       
       // Calculate destination arrival time (if available)
       let destinationArrival: string | null = null;
       let destinationFound = false;
       
       if (journey.OnwardCalls?.OnwardCall) {
-        // Log more information about onward calls to debug this issue
-        console.log(`Bus ${vehicleRef} has ${journey.OnwardCalls.OnwardCall.length} onward calls. Looking for stop ${destinationId}`);
-        
-        // DEBUG: Check if we need to transform the destination ID for comparison
-        console.log(`DESTINATION ID FORMAT CHECK: ${destinationId}`);
+        // Create variations of the destination ID for comparison
         const destinationIdVariations = [
           destinationId,
           destinationId.replace('MTA_', ''),
           `MTA_${destinationId.replace('MTA_', '')}`
         ];
-        console.log(`Checking variations of destination ID:`, destinationIdVariations);
-        
-        // Check for different formats of stop IDs in the onward calls
-        const onwardStopFormats = journey.OnwardCalls.OnwardCall.slice(0, 3).map(call => {
-          return {
-            stopRef: call.StopPointRef,
-            format: call.StopPointRef.includes('MTA_') ? 'includes MTA_' : 'raw id',
-            length: call.StopPointRef.length
-          };
-        });
-        console.log(`Sample stop formats in onward calls:`, onwardStopFormats);
         
         // Try to find the exact destination in onward calls - with original matching
         const destinationCall = journey.OnwardCalls.OnwardCall.find(
@@ -416,15 +342,11 @@ export async function GET(request: NextRequest) {
         // If not found with exact match, try with variations
         let variantDestinationCall = null;
         if (!destinationCall) {
-          console.log(`Exact destination match not found, trying variations...`);
           for (const variant of destinationIdVariations) {
             variantDestinationCall = journey.OnwardCalls.OnwardCall.find(
               (call) => call.StopPointRef === variant
             );
-            if (variantDestinationCall) {
-              console.log(`Found destination with variant: ${variant}`);
-              break;
-            }
+            if (variantDestinationCall) break;
           }
         }
         
@@ -438,7 +360,6 @@ export async function GET(request: NextRequest) {
             if (!isNaN(destArrivalDate.getTime())) {
               destinationArrival = destArrivalDate.toISOString();
               destinationFound = true;
-              console.log(`Bus ${vehicleRef} destination arrival time: ${destinationArrival} (from OnwardCalls)`);
             } else {
               console.warn(`Invalid destination arrival time format: ${finalDestinationCall.ExpectedArrivalTime}`);
             }
@@ -446,9 +367,6 @@ export async function GET(request: NextRequest) {
             console.error('Error parsing destination arrival time:', e);
           }
         } else {
-          console.log(`Bus ${vehicleRef} has onward calls but none for the destination stop ${destinationId}. Available stops:`, 
-            journey.OnwardCalls.OnwardCall.map(call => call.StopPointRef).join(', '));
-          
           // If we can't find the exact destination, try to find the last stop this bus will visit
           // This is useful when the destination stop might not be explicitly listed in onward calls
           if (journey.OnwardCalls.OnwardCall.length > 0) {
@@ -460,7 +378,6 @@ export async function GET(request: NextRequest) {
                   // Use the last stop as an approximation if it's after the origin arrival time
                   if (originArrivalDate && lastCallDate > originArrivalDate) {
                     destinationArrival = lastCallDate.toISOString();
-                    console.log(`Bus ${vehicleRef} using last onward call as destination approximation: ${destinationArrival}`);
                   }
                 }
               } catch (e) {
@@ -469,11 +386,6 @@ export async function GET(request: NextRequest) {
             }
           }
         }
-      }
-      
-      // No longer estimate destination arrival times if not available from API
-      if (!destinationArrival) {
-        console.log(`Bus ${vehicleRef} has no destination arrival time, showing as N/A`);
       }
       
       // Determine proximity description
@@ -499,14 +411,7 @@ export async function GET(request: NextRequest) {
       };
     });
     
-    // Log the final processed buses
-    console.log('Final processed buses:', buses.map(bus => ({
-      vehicleRef: bus.vehicleRef,
-      originStopsAway: bus.originStopsAway,
-      proximity: bus.proximity,
-      destinationArrival: bus.destinationArrival ? 'available' : 'not available',
-      isEstimated: bus.isEstimated
-    })));
+    console.log(`Found ${buses.length} buses for line ${busLine}`);
     
     return NextResponse.json({
       originName,

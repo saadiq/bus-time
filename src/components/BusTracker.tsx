@@ -143,7 +143,6 @@ const BusTrackerContent = () => {
       }
       
       const data = await response.json();
-      console.log('Bus line info response:', data);
       
       if (data.busLine) {
         setBusLineSearch(`${data.busLine.shortName} - ${data.busLine.longName}`);
@@ -177,12 +176,6 @@ const BusTrackerContent = () => {
       
       const data = await response.json();
       
-      console.log('Received stops data:', {
-        totalStops: data.stops?.length || 0,
-        directions: data.directions || [],
-        firstFewStops: data.stops?.slice(0, 3) || []
-      });
-      
       if (data.stops && data.stops.length > 0) {
         setStops(data.stops);
         
@@ -191,25 +184,9 @@ const BusTrackerContent = () => {
           // We'll just use the first direction by default
           // The swap button will handle switching between directions
           setSelectedDirection(data.directions[0].id);
-          
-          console.log('Setting direction to:', data.directions[0].id, data.directions[0].name);
         } else {
           console.warn('No directions found in the API response');
         }
-        
-        // Group stops by direction for better debugging
-        const stopsByDirection: Record<string, BusStop[]> = {};
-        data.stops.forEach((stop: BusStop) => {
-          if (!stopsByDirection[stop.direction]) {
-            stopsByDirection[stop.direction] = [];
-          }
-          stopsByDirection[stop.direction].push(stop);
-        });
-        
-        console.log('Stops by direction:', Object.keys(stopsByDirection).map(dir => ({
-          direction: dir,
-          stopCount: stopsByDirection[dir]?.length || 0
-        })));
         
         // Set default origin and destination, but try to preserve existing selections if they exist
         if (data.directions && data.directions.length > 0) {
@@ -217,8 +194,6 @@ const BusTrackerContent = () => {
           const firstDirectionStops = data.stops.filter(
             (stop: BusStop) => stop.direction === firstDirectionName
           );
-          
-          console.log('First direction stops count:', firstDirectionStops.length);
           
           if (firstDirectionStops.length > 0) {
             const firstStop = firstDirectionStops[0];
@@ -241,15 +216,6 @@ const BusTrackerContent = () => {
             updateUrl({ 
               originId: newOriginId, 
               destinationId: newDestinationId 
-            });
-            
-            console.log('Set origin/destination:', {
-              preserved: {
-                origin: shouldPreserveOrigin,
-                destination: shouldPreserveDestination
-              },
-              origin: newOriginId,
-              destination: newDestinationId
             });
           } else {
             console.warn('No stops found for the first direction:', firstDirectionName);
@@ -407,7 +373,6 @@ const BusTrackerContent = () => {
         // Get the opposite direction index
         const newDirIndex = (currentDirIndex + 1) % directions.length;
         setSelectedDirection(directions[newDirIndex].id);
-        console.log(`Swapped direction from ${directions[currentDirIndex].name} to ${directions[newDirIndex].name}`);
       }
     }
     
@@ -467,9 +432,6 @@ const BusTrackerContent = () => {
           setError(data.errorMessage || 'Unable to get real-time bus arrival data for these stops');
           setArrivals([]);
         } else {
-          // Log the raw bus data to debug
-          console.log('Raw bus data from API:', data.buses);
-          
           // Process each bus arrival
           const processedArrivals = data.buses.map((bus: BusResponse) => {
             // Safely parse dates
@@ -497,16 +459,6 @@ const BusTrackerContent = () => {
             } catch (e) {
               console.error('Error parsing bus arrival times:', e);
             }
-            
-            // Enhanced logging to debug arrival time issues
-            console.log(`Bus ${bus.vehicleRef} details:`, {
-              originArrival: bus.originArrival, 
-              destinationArrival: bus.destinationArrival,
-              parsedOriginArrival: originArrival ? originArrival.toLocaleTimeString() : 'null',
-              parsedDestinationArrival: destinationArrival ? destinationArrival.toLocaleTimeString() : 'null',
-              stopsAway: bus.originStopsAway,
-              formattedDestinationTime: formatTime(destinationArrival)
-            });
             
             const result = {
               vehicleId: bus.vehicleRef,
@@ -574,7 +526,6 @@ const BusTrackerContent = () => {
     }
     
     const filteredStops = stops.filter(stop => stop.direction === direction.name);
-    console.log('Filtered stops for direction', direction.name, ':', filteredStops.length);
     
     if (filteredStops.length === 0) {
       console.warn('No stops found for direction:', direction.name);
@@ -582,7 +533,6 @@ const BusTrackerContent = () => {
       // If no stops match the exact direction name, try a more flexible approach
       // Sometimes API direction names might have slight differences
       const allDirectionNames = [...new Set(stops.map(s => s.direction))];
-      console.log('Available direction names in stops:', allDirectionNames);
       
       // Try to find a direction name that contains our direction name or vice versa
       const similarDirection = allDirectionNames.find(
@@ -590,7 +540,6 @@ const BusTrackerContent = () => {
       );
       
       if (similarDirection) {
-        console.log('Found similar direction name:', similarDirection);
         const directionStops = stops.filter(s => s.direction === similarDirection)
           .map(s => ({
             value: s.id,
@@ -612,7 +561,6 @@ const BusTrackerContent = () => {
   // Make sure we only compute currentStops once
   const currentStops = React.useMemo(() => {
     const directionStops = getDirectionStops();
-    console.log('Current stops count:', directionStops.length);
     return directionStops.length > 0 ? directionStops : DEFAULT_STOPS;
   }, [getDirectionStops]);
 
