@@ -1,3 +1,48 @@
+# Bus Time Tracker
+
+A Next.js application to track bus arrival times.
+
+## Setup
+
+1. Clone the repository
+2. Install dependencies
+   ```
+   npm install
+   ```
+3. Create a `.env.local` file based on `.env.local.example` and add your MTA API key
+
+## Caching Strategy
+
+This application uses Next.js Route Segment Config for caching API responses in a serverless environment:
+
+- Each API route uses `export const revalidate = 1800` (30 minutes) for caching static data like bus lines and stops
+- Real-time data (bus arrivals) uses a shorter cache duration of 30 seconds
+- The caching is handled automatically by Next.js without requiring any external services
+
+Benefits of this approach:
+- Built-in to Next.js with zero configuration
+- Works seamlessly in serverless environments like Vercel
+- No need for external dependencies or services
+- Automatic cache invalidation based on the revalidation period
+
+## Development
+
+```
+npm run dev
+```
+
+## Build
+
+```
+npm run build
+```
+
+## Production
+
+```
+npm start
+```
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
