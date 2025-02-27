@@ -10,6 +10,7 @@ interface BusArrival {
   stopsAway: number;
   destinationArrival: Date | null;
   destination: string;
+  isEstimated: boolean;
 }
 
 interface BusData {
@@ -25,6 +26,7 @@ interface BusResponse {
   destinationArrival: string | null;
   proximity: string;
   destination: string;
+  isEstimated: boolean;
 }
 
 interface BusLine {
@@ -468,6 +470,7 @@ const BusTrackerContent = () => {
           // Log the raw bus data to debug
           console.log('Raw bus data from API:', data.buses);
           
+          // Process each bus arrival
           const processedArrivals = data.buses.map((bus: BusResponse) => {
             // Safely parse dates
             let originArrival: Date | null = null;
@@ -495,15 +498,23 @@ const BusTrackerContent = () => {
               console.error('Error parsing bus arrival times:', e);
             }
             
-            // Log each bus to debug arrival time consistency
-            console.log(`Bus ${bus.vehicleRef} - Origin arrival: ${bus.originArrival}, Destination arrival: ${bus.destinationArrival}, Stops away: ${bus.originStopsAway}`);
+            // Enhanced logging to debug arrival time issues
+            console.log(`Bus ${bus.vehicleRef} details:`, {
+              originArrival: bus.originArrival, 
+              destinationArrival: bus.destinationArrival,
+              parsedOriginArrival: originArrival ? originArrival.toLocaleTimeString() : 'null',
+              parsedDestinationArrival: destinationArrival ? destinationArrival.toLocaleTimeString() : 'null',
+              stopsAway: bus.originStopsAway,
+              formattedDestinationTime: formatTime(destinationArrival)
+            });
             
             const result = {
               vehicleId: bus.vehicleRef,
               originArrival: originArrival || new Date(), // Fallback to current time if invalid
-              stopsAway: bus.originStopsAway, // Always a number now
-              destinationArrival: destinationArrival, // Can be null if not available
+              stopsAway: bus.originStopsAway, 
+              destinationArrival: destinationArrival, // Keep as null if not available
               destination: bus.destination,
+              isEstimated: bus.isEstimated || false,
             };
             
             return result;
@@ -761,7 +772,7 @@ const BusTrackerContent = () => {
                     </div>
                     <div className="flex-shrink-0 whitespace-nowrap text-right">
                       <span className="text-gray-400 mr-2">→</span>
-                      <span className="text-gray-600 text-base">@ {formatTime(bus.destinationArrival || null)}</span>
+                      <span className="text-gray-600 text-base">@ {bus.isEstimated ? <i>{formatTime(bus.destinationArrival)}</i> : formatTime(bus.destinationArrival)}</span>
                     </div>
                   </div>
                 </div>

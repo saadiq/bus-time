@@ -105,14 +105,56 @@ interface BusResponse {
   destinationArrival: string | null;
   proximity: string;
   destination: string;
+  isEstimated: boolean;
 }
 
 // Estimate travel time between stops (in minutes)
 // This is a fallback when the API doesn't provide destination times
 const estimateTripDuration = (originId: string, destinationId: string): number => {
+  // Check if origin and destination are the same
+  if (originId === destinationId) {
+    return 0;
+  }
+  
   // We could implement a more sophisticated mapping of origin->destination to trip duration
-  // For now, using a simple default value of 15 minutes
-  return 15;
+  // using a lookup table for common routes.
+  
+  // For example, a simple lookup table could be used for common origin/destination pairs
+  const knownRoutes: Record<string, number> = {
+    // Format: originId_destinationId: minutes
+    'MTA_304213_MTA_302434': 25, // Gates-Bedford to Joralemon-Court
+    'MTA_302434_MTA_304213': 25, // Joralemon-Court to Gates-Bedford
+    'MTA_304213_MTA_308212': 20, // Gates-Bedford to Fulton St
+    'MTA_308212_MTA_304213': 20, // Fulton St to Gates-Bedford
+    'MTA_304213_MTA_305423': 15, // Gates-Bedford to Atlantic Terminal
+    'MTA_305423_MTA_304213': 15, // Atlantic Terminal to Gates-Bedford
+    'MTA_302434_MTA_308212': 10, // Joralemon-Court to Fulton St
+    'MTA_308212_MTA_302434': 10, // Fulton St to Joralemon-Court
+    'MTA_302434_MTA_305423': 12, // Joralemon-Court to Atlantic Terminal
+    'MTA_305423_MTA_302434': 12, // Atlantic Terminal to Joralemon-Court
+    'MTA_308212_MTA_305423': 8,  // Fulton St to Atlantic Terminal
+    'MTA_305423_MTA_308212': 8,  // Atlantic Terminal to Fulton St
+  };
+  
+  const routeKey = `${originId}_${destinationId}`;
+  if (knownRoutes[routeKey]) {
+    return knownRoutes[routeKey];
+  }
+  
+  // If we don't have a specific known duration for this origin/destination pair,
+  // use a reasonable default based on stop ID patterns
+  
+  // Extract stop codes to check if they're in the same borough
+  const originCode = originId.replace('MTA_', '');
+  const destCode = destinationId.replace('MTA_', '');
+  
+  // If first digit of stop codes match, they're likely in the same borough
+  if (originCode.charAt(0) === destCode.charAt(0)) {
+    return 20; // Default for same borough: 20 minutes
+  }
+  
+  // Different boroughs likely means longer trip
+  return 40; // Default for different boroughs: 40 minutes
 };
 
 export async function GET(request: NextRequest) {
@@ -163,7 +205,7 @@ export async function GET(request: NextRequest) {
     
     // Use the MTA Bus Time API to get real-time arrivals
     const apiKey = process.env.MTA_API_KEY || '';
-    const url = `https://bustime.mta.info/api/siri/stop-monitoring.json?key=${apiKey}&OperatorRef=MTA&MonitoringRef=${encodeURIComponent(originId)}&LineRef=${encodeURIComponent(busLine)}`;
+    const url = `https://bustime.mta.info/api/siri/stop-monitoring.json?key=${apiKey}&version=2&OperatorRef=MTA&MonitoringRef=${encodeURIComponent(originId)}&LineRef=${encodeURIComponent(busLine)}&StopMonitoringDetailLevel=calls`;
     
     console.log('Calling MTA API:', url.replace(apiKey, '[API_KEY]'));
     
@@ -186,13 +228,18 @@ export async function GET(request: NextRequest) {
     
     const data = await response.json() as SiriResponse;
     
-    // Log the structure of the response
-    console.log('API response structure:', {
+    // Enhanced debugging: Log more details about API response structure
+    console.log('API response detailed structure:', {
       hasSiri: !!data.Siri,
       hasServiceDelivery: !!(data.Siri && data.Siri.ServiceDelivery),
       hasStopMonitoring: !!(data.Siri && data.Siri.ServiceDelivery && data.Siri.ServiceDelivery.StopMonitoringDelivery),
-      monitoringDeliveryLength: data.Siri?.ServiceDelivery?.StopMonitoringDelivery?.length || 0
+      monitoringDeliveryLength: data.Siri?.ServiceDelivery?.StopMonitoringDelivery?.length || 0,
+      responseType: typeof data,
+      responseKeysCount: Object.keys(data).length
     });
+    
+    // DEBUG: Print the full raw API response for troubleshooting
+    console.log('FULL API RESPONSE:', JSON.stringify(data).substring(0, 1000) + '...');
     
     // Extract bus arrivals from the response
     const deliveries = data.Siri?.ServiceDelivery?.StopMonitoringDelivery || [];
@@ -326,11 +373,12 @@ export async function GET(request: NextRequest) {
       // DEBUG: Log OnwardCalls information
       if (journey.OnwardCalls?.OnwardCall) {
         console.log(`Bus ${vehicleRef} has ${journey.OnwardCalls.OnwardCall.length} onward calls`);
+        console.log(`FULL ONWARD CALLS FOR BUS ${vehicleRef}:`, JSON.stringify(journey.OnwardCalls));
         journey.OnwardCalls.OnwardCall.forEach((call, index) => {
           console.log(`  Onward call ${index}: Stop ${call.StopPointRef}, Time: ${call.ExpectedArrivalTime}`);
         });
       } else {
-        console.log(`Bus ${vehicleRef} has no onward calls data`);
+        console.log(`Bus ${vehicleRef} has no onward calls data. Full journey:`, JSON.stringify(journey).substring(0, 500) + '...');
       }
       
       // Calculate destination arrival time (if available)
@@ -338,40 +386,94 @@ export async function GET(request: NextRequest) {
       let destinationFound = false;
       
       if (journey.OnwardCalls?.OnwardCall) {
+        // Log more information about onward calls to debug this issue
+        console.log(`Bus ${vehicleRef} has ${journey.OnwardCalls.OnwardCall.length} onward calls. Looking for stop ${destinationId}`);
+        
+        // DEBUG: Check if we need to transform the destination ID for comparison
+        console.log(`DESTINATION ID FORMAT CHECK: ${destinationId}`);
+        const destinationIdVariations = [
+          destinationId,
+          destinationId.replace('MTA_', ''),
+          `MTA_${destinationId.replace('MTA_', '')}`
+        ];
+        console.log(`Checking variations of destination ID:`, destinationIdVariations);
+        
+        // Check for different formats of stop IDs in the onward calls
+        const onwardStopFormats = journey.OnwardCalls.OnwardCall.slice(0, 3).map(call => {
+          return {
+            stopRef: call.StopPointRef,
+            format: call.StopPointRef.includes('MTA_') ? 'includes MTA_' : 'raw id',
+            length: call.StopPointRef.length
+          };
+        });
+        console.log(`Sample stop formats in onward calls:`, onwardStopFormats);
+        
+        // Try to find the exact destination in onward calls - with original matching
         const destinationCall = journey.OnwardCalls.OnwardCall.find(
           (call) => call.StopPointRef === destinationId
         );
         
-        if (destinationCall && destinationCall.ExpectedArrivalTime) {
+        // If not found with exact match, try with variations
+        let variantDestinationCall = null;
+        if (!destinationCall) {
+          console.log(`Exact destination match not found, trying variations...`);
+          for (const variant of destinationIdVariations) {
+            variantDestinationCall = journey.OnwardCalls.OnwardCall.find(
+              (call) => call.StopPointRef === variant
+            );
+            if (variantDestinationCall) {
+              console.log(`Found destination with variant: ${variant}`);
+              break;
+            }
+          }
+        }
+        
+        // Use either the exact match or variant match
+        const finalDestinationCall = destinationCall || variantDestinationCall;
+        
+        if (finalDestinationCall && finalDestinationCall.ExpectedArrivalTime) {
           try {
             // Parse and reformat the date for consistency
-            const destArrivalDate = new Date(destinationCall.ExpectedArrivalTime);
+            const destArrivalDate = new Date(finalDestinationCall.ExpectedArrivalTime);
             if (!isNaN(destArrivalDate.getTime())) {
               destinationArrival = destArrivalDate.toISOString();
               destinationFound = true;
               console.log(`Bus ${vehicleRef} destination arrival time: ${destinationArrival} (from OnwardCalls)`);
             } else {
-              console.warn(`Invalid destination arrival time format: ${destinationCall.ExpectedArrivalTime}`);
+              console.warn(`Invalid destination arrival time format: ${finalDestinationCall.ExpectedArrivalTime}`);
             }
           } catch (e) {
             console.error('Error parsing destination arrival time:', e);
           }
         } else {
-          console.log(`Bus ${vehicleRef} has onward calls but none for the destination stop ${destinationId}`);
+          console.log(`Bus ${vehicleRef} has onward calls but none for the destination stop ${destinationId}. Available stops:`, 
+            journey.OnwardCalls.OnwardCall.map(call => call.StopPointRef).join(', '));
+          
+          // If we can't find the exact destination, try to find the last stop this bus will visit
+          // This is useful when the destination stop might not be explicitly listed in onward calls
+          if (journey.OnwardCalls.OnwardCall.length > 0) {
+            const lastCall = journey.OnwardCalls.OnwardCall[journey.OnwardCalls.OnwardCall.length - 1];
+            if (lastCall && lastCall.ExpectedArrivalTime) {
+              try {
+                const lastCallDate = new Date(lastCall.ExpectedArrivalTime);
+                if (!isNaN(lastCallDate.getTime())) {
+                  // Use the last stop as an approximation if it's after the origin arrival time
+                  if (originArrivalDate && lastCallDate > originArrivalDate) {
+                    destinationArrival = lastCallDate.toISOString();
+                    console.log(`Bus ${vehicleRef} using last onward call as destination approximation: ${destinationArrival}`);
+                  }
+                }
+              } catch (e) {
+                console.error('Error parsing last call arrival time:', e);
+              }
+            }
+          }
         }
       }
       
-      // If we don't have destination arrival time but we have origin arrival time,
-      // estimate the destination arrival time
-      if (!destinationArrival && originArrivalDate && !isNaN(originArrivalDate.getTime())) {
-        // We need to estimate the destination arrival
-        // Get an estimated trip duration in minutes
-        const tripDurationMinutes = estimateTripDuration(originId, destinationId);
-        
-        // Calculate the estimated arrival time at the destination
-        const estimatedDestinationDate = new Date(originArrivalDate.getTime() + tripDurationMinutes * 60000);
-        destinationArrival = estimatedDestinationDate.toISOString();
-        console.log(`Bus ${vehicleRef} using estimated destination arrival time: ${destinationArrival} (${tripDurationMinutes} mins from origin)`);
+      // No longer estimate destination arrival times if not available from API
+      if (!destinationArrival) {
+        console.log(`Bus ${vehicleRef} has no destination arrival time, showing as N/A`);
       }
       
       // Determine proximity description
@@ -392,7 +494,8 @@ export async function GET(request: NextRequest) {
         originStopsAway,
         destinationArrival,
         proximity,
-        destination
+        destination,
+        isEstimated: destinationArrival !== null && !destinationFound
       };
     });
     
@@ -401,7 +504,8 @@ export async function GET(request: NextRequest) {
       vehicleRef: bus.vehicleRef,
       originStopsAway: bus.originStopsAway,
       proximity: bus.proximity,
-      destinationArrival: bus.destinationArrival ? 'available' : 'not available'
+      destinationArrival: bus.destinationArrival ? 'available' : 'not available',
+      isEstimated: bus.isEstimated
     })));
     
     return NextResponse.json({
