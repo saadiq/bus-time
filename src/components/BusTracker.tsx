@@ -67,22 +67,24 @@ const BusTrackerContent = () => {
   const router = useRouter();
   const query = useSearchParams();
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const defaultStopsLoadedRef = useRef<boolean>(false);
 
   const [arrivals, setArrivals] = useState<BusArrival[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [busStopError, setBusStopError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<BusData | null>(null);
   const [cutoffTime, setCutoffTime] = useState('08:00');
   const [enableCutoff, setEnableCutoff] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [nextRefreshIn, setNextRefreshIn] = useState<number>(POLLING_INTERVAL / 1000);
-  
+
   // Route selection state
   const [busLineSearch, setBusLineSearch] = useState('');
   const [busLineResults, setBusLineResults] = useState<BusLine[]>([]);
   const [busLineLoading, setBusLineLoading] = useState(false);
   const [showBusLineResults, setShowBusLineResults] = useState(false);
-  
+
   // Stops state
   const [stops, setStops] = useState<BusStop[]>([]);
   const [directions, setDirections] = useState<Direction[]>([]);
@@ -101,12 +103,12 @@ const BusTrackerContent = () => {
   // Update URL with current parameters
   const updateUrl = useCallback((params: Record<string, string>) => {
     const urlParams = new URLSearchParams();
-    
+
     // Add current parameters
     urlParams.set('busLine', busLineId);
     urlParams.set('originId', originId);
     urlParams.set('destinationId', destinationId);
-    
+
     // Add or override with new parameters
     Object.entries(params).forEach(([key, value]) => {
       if (value === 'false') {
@@ -115,7 +117,7 @@ const BusTrackerContent = () => {
         urlParams.set(key, value);
       }
     });
-    
+
     router.replace(`?${urlParams.toString()}`);
   }, [busLineId, originId, destinationId, router]);
 
@@ -125,7 +127,7 @@ const BusTrackerContent = () => {
       setBusLineLoading(true);
       // Create a more descriptive fallback name from the lineId
       let fallbackName = lineId;
-      
+
       // Handle typical format like "MTA NYCT_B52"
       if (lineId.includes('_')) {
         const parts = lineId.split('_');
@@ -134,16 +136,16 @@ const BusTrackerContent = () => {
           fallbackName = `${routeId}`;
         }
       }
-      
+
       const response = await fetch(`/api/bus-lines/info?lineId=${encodeURIComponent(lineId)}`);
       if (!response.ok) {
         console.error(`Failed to fetch bus line details: ${response.status}`);
         setBusLineSearch(`Bus ${fallbackName}`);
         return;
       }
-      
+
       const data = await response.json();
-      
+
       if (data.busLine) {
         setBusLineSearch(`${data.busLine.shortName} - ${data.busLine.longName}`);
       } else {
@@ -172,13 +174,41 @@ const BusTrackerContent = () => {
     setStopsLoading(true);
     try {
       const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(lineId)}`);
+
+      // Handle not-found errors more gracefully (API returns 404 when no stops are found)
+      if (response.status === 404) {
+        console.warn(`No stops found for bus line: ${lineId}`);
+        // Keep existing stops if available, otherwise use defaults
+        if (stops.length === 0) {
+          console.log('Falling back to default stops');
+          setStops(DEFAULT_STOPS.map(stop => ({
+            id: stop.value,
+            code: '',
+            name: stop.label,
+            direction: 'Default',
+            sequence: 0,
+            lat: 0,
+            lon: 0
+          })));
+          setDirections([{ id: 'default', name: 'Default Direction' }]);
+          setSelectedDirection('default');
+        }
+
+        // We're keeping the existing stops, so just preserve origin and destination
+        setOriginId(preserveOriginId || originId);
+        setDestinationId(preserveDestinationId || destinationId);
+        setBusStopError('No stops found for this bus line. Using default or previously loaded stops.');
+        return;
+      }
+
       if (!response.ok) throw new Error('Failed to fetch bus stops');
-      
+
       const data = await response.json();
-      
+
       if (data.stops && data.stops.length > 0) {
+        setBusStopError(null); // Clear any previous errors
         setStops(data.stops);
-        
+
         if (data.directions && data.directions.length > 0) {
           setDirections(data.directions);
           // We'll just use the first direction by default
@@ -187,35 +217,35 @@ const BusTrackerContent = () => {
         } else {
           console.warn('No directions found in the API response');
         }
-        
+
         // Set default origin and destination, but try to preserve existing selections if they exist
         if (data.directions && data.directions.length > 0) {
           const firstDirectionName = data.directions[0].name;
           const firstDirectionStops = data.stops.filter(
             (stop: BusStop) => stop.direction === firstDirectionName
           );
-          
+
           if (firstDirectionStops.length > 0) {
             const firstStop = firstDirectionStops[0];
             const lastStop = firstDirectionStops[firstDirectionStops.length - 1];
-            
+
             // Check if we need to preserve user selections
             const allStopIds = data.stops.map((s: BusStop) => s.id);
             const shouldPreserveOrigin = preserveOriginId && allStopIds.includes(preserveOriginId);
             const shouldPreserveDestination = preserveDestinationId && allStopIds.includes(preserveDestinationId);
-            
+
             // If the preserved stops are available in the new bus line, use them
             // Otherwise use the first and last stops
             const newOriginId = shouldPreserveOrigin ? preserveOriginId : firstStop.id;
             const newDestinationId = shouldPreserveDestination ? preserveDestinationId : lastStop.id;
-            
+
             setOriginId(newOriginId);
             setDestinationId(newDestinationId);
-            
+
             // Update URL with new origin and destination
-            updateUrl({ 
-              originId: newOriginId, 
-              destinationId: newDestinationId 
+            updateUrl({
+              originId: newOriginId,
+              destinationId: newDestinationId
             });
           } else {
             console.warn('No stops found for the first direction:', firstDirectionName);
@@ -223,39 +253,76 @@ const BusTrackerContent = () => {
         }
       } else {
         console.warn('No stops found in the API response');
-        setStops([]);
-        setDirections([]);
+        // Fall back to default stops
+        if (stops.length === 0) {
+          setStops(DEFAULT_STOPS.map(stop => ({
+            id: stop.value,
+            code: '',
+            name: stop.label,
+            direction: 'Default',
+            sequence: 0,
+            lat: 0,
+            lon: 0
+          })));
+          setDirections([{ id: 'default', name: 'Default Direction' }]);
+          setSelectedDirection('default');
+        }
       }
     } catch (err) {
       console.error('Error fetching bus stops:', err);
-      setStops([]);
-      setDirections([]);
+      setBusStopError('Error loading bus stops. Using default stops.');
+
+      // Fall back to default stops
+      if (stops.length === 0) {
+        setStops(DEFAULT_STOPS.map(stop => ({
+          id: stop.value,
+          code: '',
+          name: stop.label,
+          direction: 'Default',
+          sequence: 0,
+          lat: 0,
+          lon: 0
+        })));
+        setDirections([{ id: 'default', name: 'Default Direction' }]);
+        setSelectedDirection('default');
+      }
     } finally {
       setStopsLoading(false);
     }
-  }, [updateUrl]); // Added updateUrl to dependency array
+  }, [updateUrl, originId, destinationId]);
 
   // Load parameters from URL
   useEffect(() => {
+    // Store previous busLine to detect changes
+    const prevBusLine = busLineId;
+
     // Get parameters from URL
-    if (query.get('busLine')) {
-      const busLine = query.get('busLine') || 'MTA NYCT_B52';
+    const urlBusLine = query.get('busLine');
+    if (urlBusLine) {
+      const busLine = urlBusLine || 'MTA NYCT_B52';
       setBusLineId(busLine);
-      // Fetch bus line details to update the display
-      fetchBusLineDetails(busLine);
-      // Also trigger fetching of stops for this line
-      fetchStopsForLine(busLine, 
-        query.get('originId') || undefined, 
-        query.get('destinationId') || undefined);
-      
+
+      // Only fetch bus line details and stops if the bus line has changed
+      if (busLine !== prevBusLine) {
+        // Fetch bus line details to update the display
+        fetchBusLineDetails(busLine);
+        // Also trigger fetching of stops for this line
+        fetchStopsForLine(busLine,
+          query.get('originId') || undefined,
+          query.get('destinationId') || undefined);
+      }
+
       // Auto-expand settings panel when bus line is passed in URL
       setIsConfigOpen(true);
-    } else {
-      // If no bus line in URL, fetch the default line's stops
-      fetchStopsForLine('MTA NYCT_B52', 
-        query.get('originId') || undefined, 
+    } else if (prevBusLine !== 'MTA NYCT_B52') {
+      // If no bus line in URL and we're not already on the default line, fetch the default line's stops
+      setBusLineId('MTA NYCT_B52');
+      fetchStopsForLine('MTA NYCT_B52',
+        query.get('originId') || undefined,
         query.get('destinationId') || undefined);
     }
+
+    // Always update origin and destination from URL if present
     if (query.get('originId')) {
       setOriginId(query.get('originId') || 'MTA_304213');
     }
@@ -267,14 +334,18 @@ const BusTrackerContent = () => {
       const timeQuery = query.get('time');
       setCutoffTime(timeQuery || '08:00');
     }
-  }, [query, fetchStopsForLine]);
+  }, [query, busLineId]);
 
   // At component mount, pre-fetch stop info for the default stops 
   // to ensure they have proper names on first render
   useEffect(() => {
+    // Only fetch default stop info once
+    if (defaultStopsLoadedRef.current) return;
+    defaultStopsLoadedRef.current = true;
+
     // Pre-fetch stop information for the default stops if they haven't been loaded yet
     const defaultStopIds = DEFAULT_STOPS.map(stop => stop.value);
-    
+
     const fetchDefaultStopInfo = async () => {
       try {
         // Fetch stop information for each default stop
@@ -289,9 +360,9 @@ const BusTrackerContent = () => {
           }
           return null;
         });
-        
+
         const stopResults = await Promise.all(promises);
-        
+
         // Update the DEFAULT_STOPS with actual stop names if available
         stopResults.forEach((result, index) => {
           if (result && result.name) {
@@ -302,7 +373,7 @@ const BusTrackerContent = () => {
         console.error('Error pre-fetching default stop info:', err);
       }
     };
-    
+
     fetchDefaultStopInfo();
   }, []);
 
@@ -310,12 +381,12 @@ const BusTrackerContent = () => {
   const handleBusLineSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const searchValue = e.target.value;
     setBusLineSearch(searchValue);
-    
+
     // Clear any existing timeout
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
-    
+
     // Set a new timeout to debounce the search
     searchTimeoutRef.current = setTimeout(() => {
       if (searchValue.trim().length > 1) {
@@ -333,7 +404,7 @@ const BusTrackerContent = () => {
     try {
       const response = await fetch(`/api/bus-lines?q=${encodeURIComponent(query)}`);
       if (!response.ok) throw new Error('Failed to fetch bus lines');
-      
+
       const data = await response.json();
       setBusLineResults(data.busLines || []);
       setShowBusLineResults(true);
@@ -349,12 +420,12 @@ const BusTrackerContent = () => {
   const selectBusLine = (line: BusLine) => {
     setBusLineSearch(`${line.shortName} - ${line.longName}`);
     setShowBusLineResults(false);
-    
+
     // Update the busLineId and fetch stops for this line
     // Keep current origin and destination when changing lines
     setBusLineId(line.id);
     fetchStopsForLine(line.id, originId, destinationId);
-    
+
     // Update URL with the new bus line
     updateUrl({ busLine: line.id });
   };
@@ -365,7 +436,7 @@ const BusTrackerContent = () => {
     const tempOrigin = originId;
     setOriginId(destinationId);
     setDestinationId(tempOrigin);
-    
+
     // If we have more than one direction, also flip the selected direction
     if (directions.length > 1) {
       const currentDirIndex = directions.findIndex(d => d.id === selectedDirection);
@@ -375,7 +446,7 @@ const BusTrackerContent = () => {
         setSelectedDirection(directions[newDirIndex].id);
       }
     }
-    
+
     updateUrl({ originId: destinationId, destinationId: tempOrigin });
   };
 
@@ -403,13 +474,13 @@ const BusTrackerContent = () => {
 
   const getBusStatus = (arrivalTime: Date) => {
     if (!enableCutoff) return 'normal';
-    
+
     const [hours, minutes] = cutoffTime.split(':').map(Number);
     const cutoff = new Date(arrivalTime);
     cutoff.setHours(hours, minutes, 0, 0);
-    
+
     const warningThreshold = new Date(cutoff.getTime() - 20 * 60000); // 20 minutes before
-    
+
     if (arrivalTime > cutoff) return 'late';
     if (arrivalTime >= warningThreshold) return 'warning';
     return 'normal';
@@ -421,12 +492,12 @@ const BusTrackerContent = () => {
         setLoading(true);
         const url = `/api/bus-times?busLine=${encodeURIComponent(busLineId)}&originId=${encodeURIComponent(originId)}&destinationId=${encodeURIComponent(destinationId)}`;
         const response = await fetch(url);
-        
+
         if (!response.ok) throw new Error('Failed to fetch bus data');
 
         const data = await response.json();
         setData(data);
-        
+
         // Check if the API returned an error message
         if (data.hasError) {
           setError(data.errorMessage || 'Unable to get real-time bus arrival data for these stops');
@@ -437,7 +508,7 @@ const BusTrackerContent = () => {
             // Safely parse dates
             let originArrival: Date | null = null;
             let destinationArrival: Date | null = null;
-            
+
             try {
               if (bus.originArrival) {
                 originArrival = new Date(bus.originArrival);
@@ -447,7 +518,7 @@ const BusTrackerContent = () => {
                   originArrival = null;
                 }
               }
-              
+
               if (bus.destinationArrival) {
                 destinationArrival = new Date(bus.destinationArrival);
                 // Validate the date is valid
@@ -459,23 +530,23 @@ const BusTrackerContent = () => {
             } catch (e) {
               console.error('Error parsing bus arrival times:', e);
             }
-            
+
             const result = {
               vehicleId: bus.vehicleRef,
               originArrival: originArrival || new Date(), // Fallback to current time if invalid
-              stopsAway: bus.originStopsAway, 
+              stopsAway: bus.originStopsAway,
               destinationArrival: destinationArrival, // Keep as null if not available
               destination: bus.destination,
               isEstimated: bus.isEstimated || false,
             };
-            
+
             return result;
           });
-          
+
           setArrivals(processedArrivals);
           setError(null);
         }
-        
+
         setLastRefresh(new Date());
       } catch (err) {
         setError('Unable to load bus arrival times. Please try again later.');
@@ -520,44 +591,126 @@ const BusTrackerContent = () => {
   // Get stops for current direction
   const getDirectionStops = useCallback(() => {
     const direction = directions.find(d => d.id === selectedDirection);
+
+    // Simple sorting function that uses the API-provided sequence numbers
+    const sortStopsBySequence = (stops: BusStop[]) => {
+      console.log('Sorting stops by sequence numbers provided by the API');
+      return [...stops].sort((a, b) => a.sequence - b.sequence);
+    };
+
     if (!direction) {
       console.warn('No direction found with id:', selectedDirection);
+
+      // If there are no directions at all, return all stops sorted by sequence
+      if (directions.length === 0) {
+        console.log('No directions available, sorting all stops by sequence');
+
+        // First group by direction, then sort each group by sequence
+        const directionGroups: Record<string, BusStop[]> = {};
+        stops.forEach(stop => {
+          if (!directionGroups[stop.direction]) {
+            directionGroups[stop.direction] = [];
+          }
+          directionGroups[stop.direction].push(stop);
+        });
+
+        // Sort each direction group by sequence
+        const allSortedStops: BusStop[] = [];
+        Object.values(directionGroups).forEach(dirStops => {
+          allSortedStops.push(...sortStopsBySequence(dirStops));
+        });
+
+        return allSortedStops.map(stop => ({
+          value: stop.id,
+          label: stop.name
+        }));
+      }
+
+      // If we have directions but selected one is not found,
+      // use the first direction instead
+      if (directions.length > 0) {
+        const firstDirection = directions[0];
+        setSelectedDirection(firstDirection.id);
+        console.log('Using first direction:', firstDirection.name);
+
+        const filteredStops = stops.filter(s => s.direction === firstDirection.name);
+        const sortedStops = sortStopsBySequence(filteredStops);
+
+        return sortedStops.map(s => ({
+          value: s.id,
+          label: s.name
+        }));
+      }
+
       return [];
     }
-    
+
+    console.log('Using direction:', direction.name);
     const filteredStops = stops.filter(stop => stop.direction === direction.name);
-    
+
     if (filteredStops.length === 0) {
       console.warn('No stops found for direction:', direction.name);
-      
+
       // If no stops match the exact direction name, try a more flexible approach
-      // Sometimes API direction names might have slight differences
       const allDirectionNames = [...new Set(stops.map(s => s.direction))];
-      
+
       // Try to find a direction name that contains our direction name or vice versa
       const similarDirection = allDirectionNames.find(
         dirName => dirName.includes(direction.name) || direction.name.includes(dirName)
       );
-      
+
       if (similarDirection) {
-        const directionStops = stops.filter(s => s.direction === similarDirection)
-          .map(s => ({
-            value: s.id,
-            label: s.name
-          }));
-        
-        if (directionStops.length > 0) {
-          return directionStops;
-        }
+        console.log('Found similar direction:', similarDirection);
+        const similarStops = stops.filter(s => s.direction === similarDirection);
+        const sortedStops = sortStopsBySequence(similarStops);
+
+        return sortedStops.map(s => ({
+          value: s.id,
+          label: s.name
+        }));
+      }
+
+      // If still no stops found, group by direction and sort each group
+      if (stops.length > 0) {
+        console.log('Using all stops grouped by direction and sorted by sequence');
+
+        // Group by direction first
+        const directionGroups: Record<string, BusStop[]> = {};
+        stops.forEach(stop => {
+          if (!directionGroups[stop.direction]) {
+            directionGroups[stop.direction] = [];
+          }
+          directionGroups[stop.direction].push(stop);
+        });
+
+        // Sort each direction group by sequence
+        const allSortedStops: BusStop[] = [];
+        Object.values(directionGroups).forEach(dirStops => {
+          allSortedStops.push(...sortStopsBySequence(dirStops));
+        });
+
+        return allSortedStops.map(stop => ({
+          value: stop.id,
+          label: stop.name
+        }));
       }
     }
-    
-    return filteredStops.map(stop => ({
+
+    // Sort the filtered stops by sequence
+    const sortedStops = sortStopsBySequence(filteredStops);
+
+    // Log the sorted stops and their sequence numbers for debugging
+    console.log('Stops for direction', direction.name, 'sorted by sequence:');
+    sortedStops.forEach(stop => {
+      console.log(`${stop.name}: sequence=${stop.sequence}`);
+    });
+
+    return sortedStops.map(stop => ({
       value: stop.id,
       label: stop.name
     }));
   }, [directions, selectedDirection, stops]);
-  
+
   // Make sure we only compute currentStops once
   const currentStops = React.useMemo(() => {
     const directionStops = getDirectionStops();
@@ -569,8 +722,8 @@ const BusTrackerContent = () => {
       <div className="bg-blue-500 text-white p-6 rounded-t-lg">
         <h1 className="text-2xl font-bold flex items-center gap-2">
           🚍 Bus Tracker
-          <button 
-            onClick={() => setIsConfigOpen(!isConfigOpen)} 
+          <button
+            onClick={() => setIsConfigOpen(!isConfigOpen)}
             className="ml-auto text-sm bg-blue-600 px-3 py-1 rounded-full hover:bg-blue-700"
           >
             {isConfigOpen ? 'Hide Settings' : 'Settings'}
@@ -593,12 +746,12 @@ const BusTrackerContent = () => {
                   <div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>
                 </div>
               )}
-              
+
               {showBusLineResults && busLineResults.length > 0 && (
                 <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded shadow-lg max-h-60 overflow-auto text-gray-800">
                   {busLineResults.map(line => (
-                    <div 
-                      key={line.id} 
+                    <div
+                      key={line.id}
                       className="px-3 py-2 hover:bg-blue-100 cursor-pointer border-b border-gray-100"
                       onClick={() => selectBusLine(line)}
                     >
@@ -609,12 +762,18 @@ const BusTrackerContent = () => {
                 </div>
               )}
             </div>
-            
+
+            {busStopError && (
+              <div className="bg-blue-700 border-l-4 border-yellow-400 text-white p-3 rounded mb-3">
+                <p className="text-sm">{busStopError}</p>
+              </div>
+            )}
+
             <div className="flex space-x-2">
               <div className="flex-1">
                 <label className="text-sm mb-1 block">Origin</label>
-                <select 
-                  value={originId} 
+                <select
+                  value={originId}
                   onChange={(e) => handleOriginChange(e.target.value)}
                   className="text-gray-800 rounded px-2 py-1 w-full"
                 >
@@ -623,9 +782,9 @@ const BusTrackerContent = () => {
                   ))}
                 </select>
               </div>
-              
+
               <div className="flex items-end pb-1">
-                <button 
+                <button
                   onClick={handleSwapDirections}
                   className="bg-blue-700 rounded-full p-2 hover:bg-blue-800"
                   aria-label="Switch direction"
@@ -634,11 +793,11 @@ const BusTrackerContent = () => {
                   ↔️
                 </button>
               </div>
-              
+
               <div className="flex-1">
                 <label className="text-sm mb-1 block">Destination</label>
-                <select 
-                  value={destinationId} 
+                <select
+                  value={destinationId}
                   onChange={(e) => handleDestinationChange(e.target.value)}
                   className="text-gray-800 rounded px-2 py-1 w-full"
                 >
@@ -648,7 +807,7 @@ const BusTrackerContent = () => {
                 </select>
               </div>
             </div>
-            
+
             {stopsLoading && (
               <div className="text-center py-2">
                 <div className="inline-block animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>
@@ -701,13 +860,12 @@ const BusTrackerContent = () => {
             {arrivals.map((bus) => {
               const destinationStatus = bus.destinationArrival ? getBusStatus(bus.destinationArrival) : 'normal';
               return (
-                <div 
-                  key={bus.vehicleId} 
-                  className={`p-4 rounded-lg ${
-                    destinationStatus === 'late' ? 'bg-gray-50 border-l-4 border-red-500' : 
-                    destinationStatus === 'warning' ? 'bg-gray-50 border-l-4 border-yellow-500' : 
-                    'bg-gray-50 border-l-4 border-green-500'
-                  }`}
+                <div
+                  key={bus.vehicleId}
+                  className={`p-4 rounded-lg ${destinationStatus === 'late' ? 'bg-gray-50 border-l-4 border-red-500' :
+                    destinationStatus === 'warning' ? 'bg-gray-50 border-l-4 border-yellow-500' :
+                      'bg-gray-50 border-l-4 border-green-500'
+                    }`}
                 >
                   <div className="flex justify-between items-center">
                     <div className="flex items-center">
