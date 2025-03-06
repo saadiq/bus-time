@@ -94,6 +94,7 @@ const BusTrackerContent = () => {
   const [originId, setOriginId] = useState('');
   const [destinationId, setDestinationId] = useState('');
   const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [forceUpdate, setForceUpdate] = useState(0);
 
   // Load initial data
   useEffect(() => {
@@ -227,6 +228,10 @@ const BusTrackerContent = () => {
       return;
     }
 
+    // Store the current values at the start of the fetch
+    const startOriginId = originId;
+    const startDestinationId = destinationId;
+
     setStopsLoading(true);
     try {
       const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(lineId)}`);
@@ -250,9 +255,11 @@ const BusTrackerContent = () => {
           setSelectedDirection('default');
         }
 
-        // We're keeping the existing stops, so just preserve origin and destination
-        setOriginId(preserveOriginId || originId);
-        setDestinationId(preserveDestinationId || destinationId);
+        // Only update if values haven't changed during loading
+        if (originId === startOriginId && destinationId === startDestinationId) {
+          setOriginId(preserveOriginId || originId);
+          setDestinationId(preserveDestinationId || destinationId);
+        }
         setBusStopError('No stops found for this bus line. Using default or previously loaded stops.');
         return;
       }
@@ -290,19 +297,22 @@ const BusTrackerContent = () => {
             const shouldPreserveOrigin = preserveOriginId && allStopIds.includes(preserveOriginId);
             const shouldPreserveDestination = preserveDestinationId && allStopIds.includes(preserveDestinationId);
 
-            // If the preserved stops are available in the new bus line, use them
-            // Otherwise use the first and last stops
-            const newOriginId = shouldPreserveOrigin ? preserveOriginId : firstStop.id;
-            const newDestinationId = shouldPreserveDestination ? preserveDestinationId : lastStop.id;
+            // Only update if values haven't changed during loading
+            if (originId === startOriginId && destinationId === startDestinationId) {
+              // If the preserved stops are available in the new bus line, use them
+              // Otherwise use the first and last stops
+              const newOriginId = shouldPreserveOrigin ? preserveOriginId : firstStop.id;
+              const newDestinationId = shouldPreserveDestination ? preserveDestinationId : lastStop.id;
 
-            setOriginId(newOriginId);
-            setDestinationId(newDestinationId);
+              setOriginId(newOriginId);
+              setDestinationId(newDestinationId);
 
-            // Update URL with new origin and destination
-            updateUrl({
-              originId: newOriginId,
-              destinationId: newDestinationId
-            });
+              // Update URL with new origin and destination
+              updateUrl({
+                originId: newOriginId,
+                destinationId: newDestinationId
+              });
+            }
           } else {
             console.warn('No stops found for the first direction:', firstDirectionName);
           }
@@ -482,22 +492,36 @@ const BusTrackerContent = () => {
 
   // Swap direction function
   const handleSwapDirections = () => {
-    // Swap origin and destination
+    // Store the values we want to swap
     const tempOrigin = originId;
-    setOriginId(destinationId);
-    setDestinationId(tempOrigin);
+    const tempDestination = destinationId;
 
-    // If we have more than one direction, also flip the selected direction
+    // First, update the direction if we have multiple directions
     if (directions.length > 1) {
       const currentDirIndex = directions.findIndex(d => d.id === selectedDirection);
       if (currentDirIndex !== -1) {
         // Get the opposite direction index
         const newDirIndex = (currentDirIndex + 1) % directions.length;
+        // Update direction synchronously
         setSelectedDirection(directions[newDirIndex].id);
+
+        // Fetch new stops for the new direction, but preserve our swapped selections
+        fetchStopsForLine(busLineId, tempDestination, tempOrigin);
       }
     }
 
-    updateUrl({ originId: destinationId, destinationId: tempOrigin });
+    // Update state with swapped values immediately
+    setOriginId(tempDestination);
+    setDestinationId(tempOrigin);
+
+    // Force a recomputation of currentStops
+    setForceUpdate(prev => prev + 1);
+
+    // Update URL with swapped values
+    updateUrl({
+      originId: tempDestination,
+      destinationId: tempOrigin
+    });
   };
 
   const handleCutoffChange = (value: boolean) => {
@@ -804,9 +828,10 @@ const BusTrackerContent = () => {
     if (!busLineId) {
       return [];
     }
+    console.log('Recomputing currentStops with direction:', selectedDirection);
     const directionStops = getDirectionStops();
     return directionStops.length > 0 ? directionStops : DEFAULT_STOPS;
-  }, [getDirectionStops, busLineId]);
+  }, [getDirectionStops, busLineId, selectedDirection, forceUpdate]);
 
   return (
     <div className="max-w-lg mx-auto bg-white rounded-lg shadow-md">
