@@ -540,6 +540,9 @@ const BusTrackerContent = () => {
     setBusLineResults([]); // Clear search results
     setShowBusLineResults(false); // Hide search results dropdown
 
+    // Clear bus line ref
+    currentBusLineRef.current = { id: '', search: '' };
+
     // Clear local storage
     localStorage.removeItem('busLine');
     localStorage.removeItem('busLineSearch');
