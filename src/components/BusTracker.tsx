@@ -840,6 +840,10 @@ const BusTrackerContent = () => {
                 type="text"
                 value={busLineSearch}
                 onChange={handleBusLineSearchChange}
+                onFocus={() => {
+                  setBusLineSearch('');
+                  setShowBusLineResults(false);
+                }}
                 placeholder="Start typing bus line (e.g. B52)"
                 className="text-gray-800 rounded px-2 py-1 w-full"
               />
