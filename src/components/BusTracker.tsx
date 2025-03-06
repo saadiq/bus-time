@@ -812,7 +812,7 @@ const BusTrackerContent = () => {
     <div className="max-w-lg mx-auto bg-white rounded-lg shadow-md">
       <div className="bg-blue-500 text-white p-6 rounded-t-lg">
         <h1 className="text-2xl font-bold flex items-center gap-2">
-          🚍 Bus Tracker
+          🚍 {busLineId ? `${busLineSearch.split(' - ')[0]} ` : ''}Bus Tracker
           <button
             onClick={() => setIsConfigOpen(!isConfigOpen)}
             className="ml-auto text-sm bg-blue-600 px-3 py-1 rounded-full hover:bg-blue-700"
