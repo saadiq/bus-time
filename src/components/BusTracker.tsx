@@ -87,6 +87,9 @@ const BusTrackerContent = () => {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [forceUpdate, setForceUpdate] = useState(0);
 
+  // Add refs to track current bus line info
+  const currentBusLineRef = useRef({ id: '', search: '' });
+
   // Load initial data
   useEffect(() => {
     setLastRefresh(new Date());
@@ -241,6 +244,9 @@ const BusTrackerContent = () => {
 
   // Fetch stops for a selected bus line - wrapped in useCallback to prevent recreating on each render
   const fetchStopsForLine = useCallback(async (lineId: string, preserveOriginId?: string, preserveDestinationId?: string) => {
+    // Store current bus line info
+    const currentBusLineSearch = busLineSearch;
+
     // Don't fetch if no line ID is provided
     if (!lineId) {
       setStopsLoading(false);
@@ -271,6 +277,8 @@ const BusTrackerContent = () => {
         setSelectedDirection('');
         setOriginId('');
         setDestinationId('');
+        // Restore bus line info
+        setBusLineSearch(currentBusLineSearch);
         return;
       }
 
@@ -290,8 +298,6 @@ const BusTrackerContent = () => {
 
         if (data.directions && data.directions.length > 0) {
           setDirections(data.directions);
-          // We'll just use the first direction by default
-          // The swap button will handle switching between directions
           setSelectedDirection(data.directions[0].id);
         } else {
           console.warn('No directions found in the API response');
@@ -299,7 +305,6 @@ const BusTrackerContent = () => {
 
         // Only set default origin/destination if we're preserving values
         if (preserveOriginId && preserveDestinationId) {
-          // Check if the preserved stops are still valid for this line
           const allStopIds = data.stops.map((s: BusStop) => s.id);
           const shouldPreserveOrigin = allStopIds.includes(preserveOriginId);
           const shouldPreserveDestination = allStopIds.includes(preserveDestinationId);
@@ -307,18 +312,15 @@ const BusTrackerContent = () => {
           if (shouldPreserveOrigin && shouldPreserveDestination) {
             setOriginId(preserveOriginId);
             setDestinationId(preserveDestinationId);
-            // Only update URL if we're preserving both values
             updateUrl({
               originId: preserveOriginId,
               destinationId: preserveDestinationId
             });
           } else {
-            // If preserved stops aren't valid, clear them
             setOriginId('');
             setDestinationId('');
           }
         } else {
-          // Clear origin/destination when loading new stops without preservation
           setOriginId('');
           setDestinationId('');
         }
@@ -330,6 +332,8 @@ const BusTrackerContent = () => {
         setSelectedDirection('');
         setOriginId('');
         setDestinationId('');
+        // Restore bus line info
+        setBusLineSearch(currentBusLineSearch);
       }
     } catch (err) {
       console.error('Error fetching bus stops:', err);
@@ -339,10 +343,12 @@ const BusTrackerContent = () => {
       setSelectedDirection('');
       setOriginId('');
       setDestinationId('');
+      // Restore bus line info
+      setBusLineSearch(currentBusLineSearch);
     } finally {
       setStopsLoading(false);
     }
-  }, [updateUrl]);
+  }, [updateUrl, busLineSearch]);
 
   // Load parameters from URL
   useEffect(() => {
@@ -426,11 +432,42 @@ const BusTrackerContent = () => {
     }
   };
 
+  // Update ref whenever bus line info changes
+  useEffect(() => {
+    if (busLineId && busLineSearch) {
+      currentBusLineRef.current = { id: busLineId, search: busLineSearch };
+    }
+  }, [busLineId, busLineSearch]);
+
+  // Separate effect for title updates
+  useEffect(() => {
+    const updateTitle = () => {
+      const { id, search } = currentBusLineRef.current;
+      if (id && search) {
+        document.title = `${search.split(' - ')[0]} Bus Tracker`;
+      } else {
+        document.title = 'Bus Tracker';
+      }
+    };
+
+    // Update title immediately
+    updateTitle();
+
+    // Set up an interval to check and update the title
+    const intervalId = setInterval(updateTitle, 100);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, []);
+
   // Swap direction function
   const handleSwapDirections = () => {
-    // Store the values we want to swap
+    // Store current values
     const tempOrigin = originId;
     const tempDestination = destinationId;
+    const currentBusLineSearch = currentBusLineRef.current.search;
+    const currentBusLineId = currentBusLineRef.current.id;
 
     // First, update the direction if we have multiple directions
     if (directions.length > 1) {
@@ -440,9 +477,6 @@ const BusTrackerContent = () => {
         const newDirIndex = (currentDirIndex + 1) % directions.length;
         // Update direction synchronously
         setSelectedDirection(directions[newDirIndex].id);
-
-        // Fetch new stops for the new direction, but preserve our swapped selections
-        fetchStopsForLine(busLineId, tempDestination, tempOrigin);
       }
     }
 
@@ -458,6 +492,13 @@ const BusTrackerContent = () => {
       originId: tempDestination,
       destinationId: tempOrigin
     });
+
+    // Ensure bus line info is preserved before fetching stops
+    setBusLineId(currentBusLineId);
+    setBusLineSearch(currentBusLineSearch);
+
+    // Fetch new stops for the new direction, but preserve our swapped selections
+    fetchStopsForLine(currentBusLineId, tempDestination, tempOrigin);
   };
 
   const handleCutoffChange = (value: boolean) => {

@@ -15,8 +15,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Morning Commute",
-  description: "Bus commute home arrival times with estimated destination arrival times",
+  title: "Bus Tracker",
+  description: "Bus commute origin arrival times with destination arrival times",
 };
 
 export default function RootLayout({
