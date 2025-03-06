@@ -146,10 +146,14 @@ const BusTrackerContent = () => {
   const updateUrl = useCallback((params: Record<string, string>) => {
     const urlParams = new URLSearchParams();
 
-    // Add current parameters
-    urlParams.set('busLine', busLineId);
-    urlParams.set('originId', originId);
-    urlParams.set('destinationId', destinationId);
+    // Only add parameters that have values
+    if (busLineId) urlParams.set('busLine', busLineId);
+    if (originId) urlParams.set('originId', originId);
+    if (destinationId) urlParams.set('destinationId', destinationId);
+    if (enableCutoff) {
+      urlParams.set('cutoff', 'true');
+      urlParams.set('time', cutoffTime);
+    }
 
     // Add or override with new parameters
     Object.entries(params).forEach(([key, value]) => {
@@ -160,8 +164,16 @@ const BusTrackerContent = () => {
       }
     });
 
-    router.replace(`?${urlParams.toString()}`);
-  }, [busLineId, originId, destinationId, router]);
+    // Only update URL if parameters have changed
+    const currentUrl = new URL(window.location.href);
+    const currentParams = new URLSearchParams(currentUrl.search);
+    const newParamsString = urlParams.toString();
+    const currentParamsString = currentParams.toString();
+
+    if (newParamsString !== currentParamsString) {
+      router.replace(`?${newParamsString}`);
+    }
+  }, [busLineId, originId, destinationId, enableCutoff, cutoffTime, router]);
 
   // Fetch bus line details by ID
   const fetchBusLineDetails = async (lineId: string) => {
@@ -211,6 +223,22 @@ const BusTrackerContent = () => {
     }
   };
 
+  // Select a bus line from the results
+  const selectBusLine = (line: BusLine) => {
+    setBusLineSearch(`${line.shortName} - ${line.longName}`);
+    setShowBusLineResults(false);
+
+    // Update the busLineId and fetch stops for this line
+    // Don't preserve origin/destination when explicitly selecting a new line
+    setBusLineId(line.id);
+    fetchStopsForLine(line.id);
+
+    // Update URL with only the bus line
+    const urlParams = new URLSearchParams();
+    urlParams.set('busLine', line.id);
+    router.replace(`?${urlParams.toString()}`);
+  };
+
   // Fetch stops for a selected bus line - wrapped in useCallback to prevent recreating on each render
   const fetchStopsForLine = useCallback(async (lineId: string, preserveOriginId?: string, preserveDestinationId?: string) => {
     // Don't fetch if no line ID is provided
@@ -218,10 +246,6 @@ const BusTrackerContent = () => {
       setStopsLoading(false);
       return;
     }
-
-    // Store the current values at the start of the fetch
-    const startOriginId = originId;
-    const startDestinationId = destinationId;
 
     setStopsLoading(true);
     try {
@@ -273,41 +297,30 @@ const BusTrackerContent = () => {
           console.warn('No directions found in the API response');
         }
 
-        // Set default origin and destination, but try to preserve existing selections if they exist
-        if (data.directions && data.directions.length > 0) {
-          const firstDirectionName = data.directions[0].name;
-          const firstDirectionStops = data.stops.filter(
-            (stop: BusStop) => stop.direction === firstDirectionName
-          );
+        // Only set default origin/destination if we're preserving values
+        if (preserveOriginId && preserveDestinationId) {
+          // Check if the preserved stops are still valid for this line
+          const allStopIds = data.stops.map((s: BusStop) => s.id);
+          const shouldPreserveOrigin = allStopIds.includes(preserveOriginId);
+          const shouldPreserveDestination = allStopIds.includes(preserveDestinationId);
 
-          if (firstDirectionStops.length > 0) {
-            const firstStop = firstDirectionStops[0];
-            const lastStop = firstDirectionStops[firstDirectionStops.length - 1];
-
-            // Check if we need to preserve user selections
-            const allStopIds = data.stops.map((s: BusStop) => s.id);
-            const shouldPreserveOrigin = preserveOriginId && allStopIds.includes(preserveOriginId);
-            const shouldPreserveDestination = preserveDestinationId && allStopIds.includes(preserveDestinationId);
-
-            // Only update if values haven't changed during loading
-            if (originId === startOriginId && destinationId === startDestinationId) {
-              // If the preserved stops are available in the new bus line, use them
-              // Otherwise use the first and last stops
-              const newOriginId = shouldPreserveOrigin ? preserveOriginId : firstStop.id;
-              const newDestinationId = shouldPreserveDestination ? preserveDestinationId : lastStop.id;
-
-              setOriginId(newOriginId);
-              setDestinationId(newDestinationId);
-
-              // Update URL with new origin and destination
-              updateUrl({
-                originId: newOriginId,
-                destinationId: newDestinationId
-              });
-            }
+          if (shouldPreserveOrigin && shouldPreserveDestination) {
+            setOriginId(preserveOriginId);
+            setDestinationId(preserveDestinationId);
+            // Only update URL if we're preserving both values
+            updateUrl({
+              originId: preserveOriginId,
+              destinationId: preserveDestinationId
+            });
           } else {
-            console.warn('No stops found for the first direction:', firstDirectionName);
+            // If preserved stops aren't valid, clear them
+            setOriginId('');
+            setDestinationId('');
           }
+        } else {
+          // Clear origin/destination when loading new stops without preservation
+          setOriginId('');
+          setDestinationId('');
         }
       } else {
         console.warn('No stops found in the API response');
@@ -329,46 +342,50 @@ const BusTrackerContent = () => {
     } finally {
       setStopsLoading(false);
     }
-  }, [updateUrl, originId, destinationId]);
+  }, [updateUrl]);
 
   // Load parameters from URL
   useEffect(() => {
-    // Store previous busLine to detect changes
+    // Store previous values to detect changes
     const prevBusLine = busLineId;
+    const prevOriginId = originId;
+    const prevDestinationId = destinationId;
 
     // Get parameters from URL
     const urlBusLine = query.get('busLine');
+    const urlOriginId = query.get('originId');
+    const urlDestinationId = query.get('destinationId');
+
+    // Only update if values are different
+    if (urlBusLine && urlBusLine !== prevBusLine) {
+      setBusLineId(urlBusLine);
+      fetchBusLineDetails(urlBusLine);
+      fetchStopsForLine(urlBusLine,
+        urlOriginId || undefined,
+        urlDestinationId || undefined);
+    }
+
+    // Only update origin/destination if they've changed
+    if (urlOriginId && urlOriginId !== prevOriginId) {
+      setOriginId(urlOriginId);
+    }
+    if (urlDestinationId && urlDestinationId !== prevDestinationId) {
+      setDestinationId(urlDestinationId);
+    }
+
+    // Handle cutoff settings
+    const urlCutoff = query.get('cutoff');
+    const urlTime = query.get('time');
+    if (urlCutoff === 'true') {
+      setEnableCutoff(true);
+      if (urlTime) setCutoffTime(urlTime);
+    }
+
+    // Auto-expand settings panel when bus line is passed in URL
     if (urlBusLine) {
-      const busLine = urlBusLine;
-      setBusLineId(busLine);
-
-      // Only fetch bus line details and stops if the bus line has changed
-      if (busLine !== prevBusLine) {
-        // Fetch bus line details to update the display
-        fetchBusLineDetails(busLine);
-        // Also trigger fetching of stops for this line
-        fetchStopsForLine(busLine,
-          query.get('originId') || undefined,
-          query.get('destinationId') || undefined);
-      }
-
-      // Auto-expand settings panel when bus line is passed in URL
       setIsConfigOpen(true);
     }
-
-    // Always update origin and destination from URL if present
-    if (query.get('originId')) {
-      setOriginId(query.get('originId') || '');
-    }
-    if (query.get('destinationId')) {
-      setDestinationId(query.get('destinationId') || '');
-    }
-    if (query.get('cutoff') === 'true') {
-      setEnableCutoff(true);
-      const timeQuery = query.get('time');
-      setCutoffTime(timeQuery || '08:00');
-    }
-  }, [query, busLineId]);
+  }, [query]);
 
   // Handle search input for bus lines
   const handleBusLineSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -407,20 +424,6 @@ const BusTrackerContent = () => {
     } finally {
       setBusLineLoading(false);
     }
-  };
-
-  // Select a bus line from the results
-  const selectBusLine = (line: BusLine) => {
-    setBusLineSearch(`${line.shortName} - ${line.longName}`);
-    setShowBusLineResults(false);
-
-    // Update the busLineId and fetch stops for this line
-    // Keep current origin and destination when changing lines
-    setBusLineId(line.id);
-    fetchStopsForLine(line.id, originId, destinationId);
-
-    // Update URL with the new bus line
-    updateUrl({ busLine: line.id });
   };
 
   // Swap direction function

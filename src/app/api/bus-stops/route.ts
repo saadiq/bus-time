@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
       lineId
     )}.json?key=${apiKey}&includePolylines=false&includeReferences=true&version=2`;
 
-    console.log("Fetching stops with URL:", url);
+    // console.log("Fetching stops with URL:", url);
 
     const response = await fetch(url, {
       cache: "no-store",
