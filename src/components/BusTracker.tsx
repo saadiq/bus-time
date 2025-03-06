@@ -90,15 +90,65 @@ const BusTrackerContent = () => {
   const [directions, setDirections] = useState<Direction[]>([]);
   const [selectedDirection, setSelectedDirection] = useState<string>('');
   const [stopsLoading, setStopsLoading] = useState(false);
-  const [busLineId, setBusLineId] = useState('MTA NYCT_B52');
-  const [originId, setOriginId] = useState('MTA_304213');
-  const [destinationId, setDestinationId] = useState('MTA_302434');
+  const [busLineId, setBusLineId] = useState('');
+  const [originId, setOriginId] = useState('');
+  const [destinationId, setDestinationId] = useState('');
   const [isConfigOpen, setIsConfigOpen] = useState(false);
 
   // Load initial data
   useEffect(() => {
     setLastRefresh(new Date());
+
+    // Check URL parameters first
+    const urlBusLine = query.get('busLine');
+    const urlOriginId = query.get('originId');
+    const urlDestinationId = query.get('destinationId');
+
+    // Load from URL parameters if present, otherwise from local storage
+    if (urlBusLine) {
+      setBusLineId(urlBusLine);
+      fetchBusLineDetails(urlBusLine);
+      fetchStopsForLine(urlBusLine,
+        urlOriginId || undefined,
+        urlDestinationId || undefined);
+
+      if (urlOriginId) setOriginId(urlOriginId);
+      if (urlDestinationId) setDestinationId(urlDestinationId);
+    } else {
+      // Try to load from local storage
+      const storedBusLine = localStorage.getItem('busLine');
+      const storedOriginId = localStorage.getItem('originId');
+      const storedDestinationId = localStorage.getItem('destinationId');
+      const storedBusLineSearch = localStorage.getItem('busLineSearch');
+
+      if (storedBusLine && storedOriginId && storedDestinationId) {
+        setBusLineId(storedBusLine);
+        setBusLineSearch(storedBusLineSearch || storedBusLine);
+        setOriginId(storedOriginId);
+        setDestinationId(storedDestinationId);
+        fetchStopsForLine(storedBusLine, storedOriginId, storedDestinationId);
+      } else {
+        // If no stored preferences, show the settings panel with empty state
+        setIsConfigOpen(true);
+        setBusLineId('');
+        setBusLineSearch('');
+        setOriginId('');
+        setDestinationId('');
+        setStops([]);
+      }
+    }
   }, []);
+
+  // Save selections to local storage whenever they change
+  useEffect(() => {
+    // Only save if we have all necessary values
+    if (busLineId && originId && destinationId) {
+      localStorage.setItem('busLine', busLineId);
+      localStorage.setItem('busLineSearch', busLineSearch);
+      localStorage.setItem('originId', originId);
+      localStorage.setItem('destinationId', destinationId);
+    }
+  }, [busLineId, busLineSearch, originId, destinationId]);
 
   // Update URL with current parameters
   const updateUrl = useCallback((params: Record<string, string>) => {
@@ -171,6 +221,12 @@ const BusTrackerContent = () => {
 
   // Fetch stops for a selected bus line - wrapped in useCallback to prevent recreating on each render
   const fetchStopsForLine = useCallback(async (lineId: string, preserveOriginId?: string, preserveDestinationId?: string) => {
+    // Don't fetch if no line ID is provided
+    if (!lineId) {
+      setStopsLoading(false);
+      return;
+    }
+
     setStopsLoading(true);
     try {
       const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(lineId)}`);
@@ -299,7 +355,7 @@ const BusTrackerContent = () => {
     // Get parameters from URL
     const urlBusLine = query.get('busLine');
     if (urlBusLine) {
-      const busLine = urlBusLine || 'MTA NYCT_B52';
+      const busLine = urlBusLine;
       setBusLineId(busLine);
 
       // Only fetch bus line details and stops if the bus line has changed
@@ -314,20 +370,14 @@ const BusTrackerContent = () => {
 
       // Auto-expand settings panel when bus line is passed in URL
       setIsConfigOpen(true);
-    } else if (prevBusLine !== 'MTA NYCT_B52') {
-      // If no bus line in URL and we're not already on the default line, fetch the default line's stops
-      setBusLineId('MTA NYCT_B52');
-      fetchStopsForLine('MTA NYCT_B52',
-        query.get('originId') || undefined,
-        query.get('destinationId') || undefined);
     }
 
     // Always update origin and destination from URL if present
     if (query.get('originId')) {
-      setOriginId(query.get('originId') || 'MTA_304213');
+      setOriginId(query.get('originId') || '');
     }
     if (query.get('destinationId')) {
-      setDestinationId(query.get('destinationId') || 'MTA_302434');
+      setDestinationId(query.get('destinationId') || '');
     }
     if (query.get('cutoff') === 'true') {
       setEnableCutoff(true);
@@ -472,6 +522,36 @@ const BusTrackerContent = () => {
     updateUrl({ destinationId: newDestinationId });
   };
 
+  const handleReset = () => {
+    // Clear form state
+    setBusLineId('');
+    setBusLineSearch('');
+    setOriginId('');
+    setDestinationId('');
+    setStops([]);
+    setDirections([]);
+    setSelectedDirection('');
+    setArrivals([]);
+    setData(null);
+    setError(null);
+    setBusStopError(null);
+    setStopsLoading(false); // Clear loading state
+    setBusLineResults([]); // Clear search results
+    setShowBusLineResults(false); // Hide search results dropdown
+
+    // Clear local storage
+    localStorage.removeItem('busLine');
+    localStorage.removeItem('busLineSearch');
+    localStorage.removeItem('originId');
+    localStorage.removeItem('destinationId');
+
+    // Clear URL parameters
+    router.replace('/');
+
+    // Show settings panel
+    setIsConfigOpen(true);
+  };
+
   const getBusStatus = (arrivalTime: Date) => {
     if (!enableCutoff) return 'normal';
 
@@ -488,6 +568,13 @@ const BusTrackerContent = () => {
 
   useEffect(() => {
     const fetchData = async () => {
+      // Don't fetch if we don't have all necessary values
+      if (!busLineId || !originId || !destinationId) {
+        setArrivals([]);
+        setData(null);
+        return;
+      }
+
       try {
         setLoading(true);
         const url = `/api/bus-times?busLine=${encodeURIComponent(busLineId)}&originId=${encodeURIComponent(originId)}&destinationId=${encodeURIComponent(destinationId)}`;
@@ -713,9 +800,13 @@ const BusTrackerContent = () => {
 
   // Make sure we only compute currentStops once
   const currentStops = React.useMemo(() => {
+    // If no bus line is selected, return empty array
+    if (!busLineId) {
+      return [];
+    }
     const directionStops = getDirectionStops();
     return directionStops.length > 0 ? directionStops : DEFAULT_STOPS;
-  }, [getDirectionStops]);
+  }, [getDirectionStops, busLineId]);
 
   return (
     <div className="max-w-lg mx-auto bg-white rounded-lg shadow-md">
@@ -732,8 +823,17 @@ const BusTrackerContent = () => {
 
         {isConfigOpen && (
           <div className="mt-4 space-y-3 p-3 bg-blue-600 rounded-lg">
+            <div className="flex justify-between items-center">
+              <label className="text-sm mb-1">Bus Line</label>
+              <button
+                onClick={handleReset}
+                className="text-xs bg-blue-700 px-2 py-1 rounded hover:bg-blue-800 transition-colors"
+                title="Clear all settings"
+              >
+                Reset
+              </button>
+            </div>
             <div className="relative">
-              <label className="text-sm mb-1 block">Bus Line</label>
               <input
                 type="text"
                 value={busLineSearch}
@@ -776,7 +876,9 @@ const BusTrackerContent = () => {
                   value={originId}
                   onChange={(e) => handleOriginChange(e.target.value)}
                   className="text-gray-800 rounded px-2 py-1 w-full"
+                  disabled={!busLineId}
                 >
+                  <option value="">Select origin</option>
                   {currentStops.map((stop) => (
                     <option key={stop.value} value={stop.value}>{stop.label}</option>
                   ))}
@@ -789,6 +891,7 @@ const BusTrackerContent = () => {
                   className="bg-blue-700 rounded-full p-2 hover:bg-blue-800"
                   aria-label="Switch direction"
                   title="Swap origin and destination"
+                  disabled={!busLineId}
                 >
                   ↔️
                 </button>
@@ -800,7 +903,9 @@ const BusTrackerContent = () => {
                   value={destinationId}
                   onChange={(e) => handleDestinationChange(e.target.value)}
                   className="text-gray-800 rounded px-2 py-1 w-full"
+                  disabled={!busLineId}
                 >
+                  <option value="">Select destination</option>
                   {currentStops.map((stop) => (
                     <option key={stop.value} value={stop.value}>{stop.label}</option>
                   ))}
