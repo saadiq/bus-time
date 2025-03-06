@@ -52,14 +52,6 @@ interface Direction {
   name: string;
 }
 
-// Default stops as a fallback
-const DEFAULT_STOPS = [
-  { value: 'MTA_304213', label: 'Gates-Bedford' },
-  { value: 'MTA_302434', label: 'Joralemon-Court' },
-  { value: 'MTA_308212', label: 'Fulton St' },
-  { value: 'MTA_305423', label: 'Atlantic Terminal' },
-];
-
 const POLLING_INTERVAL = 30000; // 30 seconds
 const DEBOUNCE_DELAY = 300; // ms for debouncing typeahead search
 
@@ -67,7 +59,6 @@ const BusTrackerContent = () => {
   const router = useRouter();
   const query = useSearchParams();
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const defaultStopsLoadedRef = useRef<boolean>(false);
 
   const [arrivals, setArrivals] = useState<BusArrival[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -234,41 +225,42 @@ const BusTrackerContent = () => {
 
     setStopsLoading(true);
     try {
-      const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(lineId)}`);
+      // Add a timeout to the fetch request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+      const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(lineId)}`, {
+        signal: controller.signal,
+        headers: {
+          'Cache-Control': 'no-cache',
+        },
+      });
+
+      clearTimeout(timeoutId);
 
       // Handle not-found errors more gracefully (API returns 404 when no stops are found)
       if (response.status === 404) {
         console.warn(`No stops found for bus line: ${lineId}`);
-        // Keep existing stops if available, otherwise use defaults
-        if (stops.length === 0) {
-          console.log('Falling back to default stops');
-          setStops(DEFAULT_STOPS.map(stop => ({
-            id: stop.value,
-            code: '',
-            name: stop.label,
-            direction: 'Default',
-            sequence: 0,
-            lat: 0,
-            lon: 0
-          })));
-          setDirections([{ id: 'default', name: 'Default Direction' }]);
-          setSelectedDirection('default');
-        }
-
-        // Only update if values haven't changed during loading
-        if (originId === startOriginId && destinationId === startDestinationId) {
-          setOriginId(preserveOriginId || originId);
-          setDestinationId(preserveDestinationId || destinationId);
-        }
-        setBusStopError('No stops found for this bus line. Using default or previously loaded stops.');
+        setBusStopError('No stops found for this bus line. Please try another line.');
+        setStops([]);
+        setDirections([]);
+        setSelectedDirection('');
+        setOriginId('');
+        setDestinationId('');
         return;
       }
 
-      if (!response.ok) throw new Error('Failed to fetch bus stops');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch bus stops: ${response.status} ${response.statusText}`);
+      }
 
       const data = await response.json();
 
-      if (data.stops && data.stops.length > 0) {
+      if (!data || !data.stops) {
+        throw new Error('Invalid response format from bus stops API');
+      }
+
+      if (data.stops.length > 0) {
         setBusStopError(null); // Clear any previous errors
         setStops(data.stops);
 
@@ -319,39 +311,21 @@ const BusTrackerContent = () => {
         }
       } else {
         console.warn('No stops found in the API response');
-        // Fall back to default stops
-        if (stops.length === 0) {
-          setStops(DEFAULT_STOPS.map(stop => ({
-            id: stop.value,
-            code: '',
-            name: stop.label,
-            direction: 'Default',
-            sequence: 0,
-            lat: 0,
-            lon: 0
-          })));
-          setDirections([{ id: 'default', name: 'Default Direction' }]);
-          setSelectedDirection('default');
-        }
+        setBusStopError('No stops available for this bus line. Please try another line.');
+        setStops([]);
+        setDirections([]);
+        setSelectedDirection('');
+        setOriginId('');
+        setDestinationId('');
       }
     } catch (err) {
       console.error('Error fetching bus stops:', err);
-      setBusStopError('Error loading bus stops. Using default stops.');
-
-      // Fall back to default stops
-      if (stops.length === 0) {
-        setStops(DEFAULT_STOPS.map(stop => ({
-          id: stop.value,
-          code: '',
-          name: stop.label,
-          direction: 'Default',
-          sequence: 0,
-          lat: 0,
-          lon: 0
-        })));
-        setDirections([{ id: 'default', name: 'Default Direction' }]);
-        setSelectedDirection('default');
-      }
+      setBusStopError('Error loading bus stops. Please try again.');
+      setStops([]);
+      setDirections([]);
+      setSelectedDirection('');
+      setOriginId('');
+      setDestinationId('');
     } finally {
       setStopsLoading(false);
     }
@@ -395,47 +369,6 @@ const BusTrackerContent = () => {
       setCutoffTime(timeQuery || '08:00');
     }
   }, [query, busLineId]);
-
-  // At component mount, pre-fetch stop info for the default stops 
-  // to ensure they have proper names on first render
-  useEffect(() => {
-    // Only fetch default stop info once
-    if (defaultStopsLoadedRef.current) return;
-    defaultStopsLoadedRef.current = true;
-
-    // Pre-fetch stop information for the default stops if they haven't been loaded yet
-    const defaultStopIds = DEFAULT_STOPS.map(stop => stop.value);
-
-    const fetchDefaultStopInfo = async () => {
-      try {
-        // Fetch stop information for each default stop
-        const promises = defaultStopIds.map(async (stopId) => {
-          try {
-            const response = await fetch(`/api/bus-stops/info?stopId=${encodeURIComponent(stopId)}`);
-            if (response.ok) {
-              return await response.json();
-            }
-          } catch (err) {
-            console.error(`Error fetching default stop ${stopId}:`, err);
-          }
-          return null;
-        });
-
-        const stopResults = await Promise.all(promises);
-
-        // Update the DEFAULT_STOPS with actual stop names if available
-        stopResults.forEach((result, index) => {
-          if (result && result.name) {
-            DEFAULT_STOPS[index].label = result.name;
-          }
-        });
-      } catch (err) {
-        console.error('Error pre-fetching default stop info:', err);
-      }
-    };
-
-    fetchDefaultStopInfo();
-  }, []);
 
   // Handle search input for bus lines
   const handleBusLineSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -830,7 +763,7 @@ const BusTrackerContent = () => {
     }
     console.log('Recomputing currentStops with direction:', selectedDirection);
     const directionStops = getDirectionStops();
-    return directionStops.length > 0 ? directionStops : DEFAULT_STOPS;
+    return directionStops.length > 0 ? directionStops : [];
   }, [getDirectionStops, busLineId, selectedDirection, forceUpdate]);
 
   return (
