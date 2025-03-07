@@ -52,6 +52,10 @@ interface Direction {
   name: string;
 }
 
+interface NearbyBusLine extends BusLine {
+  distance: number;
+}
+
 const POLLING_INTERVAL = 30000; // 30 seconds
 const DEBOUNCE_DELAY = 300; // ms for debouncing typeahead search
 
@@ -72,7 +76,7 @@ const BusTrackerContent = () => {
 
   // Route selection state
   const [busLineSearch, setBusLineSearch] = useState('');
-  const [busLineResults, setBusLineResults] = useState<BusLine[]>([]);
+  const [busLineResults, setBusLineResults] = useState<(BusLine | NearbyBusLine)[]>([]);
   const [busLineLoading, setBusLineLoading] = useState(false);
   const [showBusLineResults, setShowBusLineResults] = useState(false);
 
@@ -89,6 +93,9 @@ const BusTrackerContent = () => {
 
   // Add refs to track current bus line info
   const currentBusLineRef = useRef({ id: '', search: '' });
+
+  const [geoLoading, setGeoLoading] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
 
   // Load initial data
   useEffect(() => {
@@ -813,6 +820,59 @@ const BusTrackerContent = () => {
     return directionStops.length > 0 ? directionStops : [];
   }, [getDirectionStops, busLineId, selectedDirection, forceUpdate]);
 
+  const handleGeolocation = async () => {
+    setGeoLoading(true);
+    setGeoError(null);
+    setBusLineResults([]);
+    setShowBusLineResults(false);
+
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 5000,
+          maximumAge: 0
+        });
+      });
+
+      const { latitude, longitude } = position.coords;
+      const response = await fetch(`/api/bus-lines/nearby?lat=${latitude}&lon=${longitude}`);
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch nearby bus lines');
+      }
+
+      const data = await response.json();
+      if (data.busLines && data.busLines.length > 0) {
+        setBusLineResults(data.busLines);
+        setShowBusLineResults(true);
+      } else {
+        setGeoError('No bus lines found nearby');
+      }
+    } catch (err) {
+      console.error('Geolocation error:', err);
+      if (err instanceof GeolocationPositionError) {
+        switch (err.code) {
+          case err.PERMISSION_DENIED:
+            setGeoError('Please allow location access to find nearby buses');
+            break;
+          case err.POSITION_UNAVAILABLE:
+            setGeoError('Unable to determine your location');
+            break;
+          case err.TIMEOUT:
+            setGeoError('Location request timed out');
+            break;
+          default:
+            setGeoError('Error getting location');
+        }
+      } else {
+        setGeoError('Error finding nearby bus lines');
+      }
+    } finally {
+      setGeoLoading(false);
+    }
+  };
+
   return (
     <div className="max-w-lg mx-auto bg-white rounded-lg shadow-md">
       <div className="bg-blue-500 text-white p-6 rounded-t-lg">
@@ -839,17 +899,41 @@ const BusTrackerContent = () => {
               </button>
             </div>
             <div className="relative">
-              <input
-                type="text"
-                value={busLineSearch}
-                onChange={handleBusLineSearchChange}
-                onFocus={() => {
-                  setBusLineSearch('');
-                  setShowBusLineResults(false);
-                }}
-                placeholder="Start typing bus line (e.g. B52)"
-                className="text-gray-800 rounded px-2 py-1 w-full"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={busLineSearch}
+                  onChange={handleBusLineSearchChange}
+                  onFocus={() => {
+                    setBusLineSearch('');
+                    setShowBusLineResults(false);
+                  }}
+                  placeholder="Start typing bus line (e.g. B52)"
+                  className="text-gray-800 rounded px-2 py-1 flex-1"
+                />
+                <button
+                  onClick={handleGeolocation}
+                  disabled={geoLoading}
+                  className="bg-blue-700 px-2 py-1 rounded hover:bg-blue-800 transition-colors flex items-center gap-1"
+                  title="Find nearby bus lines"
+                >
+                  {geoLoading ? (
+                    <div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>
+                  ) : (
+                    <>
+                      <svg className="h-4 w-4 fill-current" viewBox="0 0 24 24">
+                        <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V2c0-.55-.45-1-1-1s-1 .45-1 1v1.06C6.83 3.52 3.52 6.83 3.06 11H2c-.55 0-1 .45-1 1s.45 1 1 1h1.06c.46 4.17 3.77 7.48 7.94 7.94V22c0 .55.45 1 1 1s1-.45 1-1v-1.06c4.17-.46 7.48-3.77 7.94-7.94H22c.55 0 1-.45 1-1s-.45-1-1-1h-1.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z" />
+                      </svg>
+                      <span className="sr-only">Find nearby bus lines</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              {geoError && (
+                <div className="absolute z-10 mt-1 w-full bg-red-50 border border-red-200 text-red-600 text-sm p-2 rounded">
+                  {geoError}
+                </div>
+              )}
               {busLineLoading && (
                 <div className="absolute right-2 top-8">
                   <div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>
@@ -862,10 +946,17 @@ const BusTrackerContent = () => {
                     <div
                       key={line.id}
                       className="px-3 py-2 hover:bg-blue-100 cursor-pointer border-b border-gray-100"
-                      onClick={() => selectBusLine(line)}
+                      onClick={() => selectBusLine(line as BusLine)}
                     >
                       <div className="font-bold">{line.shortName}</div>
                       <div className="text-xs text-gray-600">{line.longName}</div>
+                      {'distance' in line && (
+                        <div className="text-xs text-blue-600 mt-1">
+                          {((line as NearbyBusLine).distance < 0.1
+                            ? 'Very close'
+                            : `${(line as NearbyBusLine).distance.toFixed(1)} miles away`)}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
