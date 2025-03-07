@@ -54,6 +54,10 @@ interface Direction {
 
 interface NearbyBusLine extends BusLine {
   distance: number;
+  closestStop: {
+    name: string;
+    distance: number;
+  };
 }
 
 const POLLING_INTERVAL = 30000; // 30 seconds
@@ -234,19 +238,263 @@ const BusTrackerContent = () => {
   };
 
   // Select a bus line from the results
-  const selectBusLine = (line: BusLine) => {
+  const selectBusLine = async (line: BusLine) => {
+    console.log('Selected line:', line);
     setBusLineSearch(`${line.shortName} - ${line.longName}`);
     setShowBusLineResults(false);
-
-    // Update the busLineId and fetch stops for this line
-    // Don't preserve origin/destination when explicitly selecting a new line
     setBusLineId(line.id);
-    fetchStopsForLine(line.id);
 
-    // Update URL with only the bus line
-    const urlParams = new URLSearchParams();
-    urlParams.set('busLine', line.id);
-    router.replace(`?${urlParams.toString()}`);
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        });
+      });
+
+      // If this is a nearby bus line, it already has the closest stop info
+      if ('closestStop' in line) {
+        const nearbyLine = line as NearbyBusLine;
+
+        // Fetch stops for this line
+        const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(line.id)}`, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch bus stops');
+        }
+
+        const data = await response.json();
+        if (!data.stops || data.stops.length === 0) {
+          throw new Error('No stops found for this line');
+        }
+
+        // Find the stop that matches the closest stop name
+        let matchingStop = null;
+        let matchReason = '';
+
+        // Special handling for B48 and B44-SBS
+        const isSBS = line.id.includes('B44+');
+        const isB48 = line.id.includes('B48');
+
+        // Normalize a stop name into a set of street names
+        const normalizeIntoStreets = (name: string): string[] => {
+          // Remove common prefixes and normalize abbreviations
+          const withoutPrefix = name.replace(/^SBS\s+/, '').replace(/^[A-Z]\d+\s+/, '');
+
+          const withNormalizedAbbrev = withoutPrefix
+            .replace(/\bWLMSBRG\b/gi, 'WILLIAMSBURG')
+            .replace(/\bBRDG\b/gi, 'BRIDGE')
+            .replace(/\bPLZ\b/gi, 'PLAZA')
+            .replace(/\bNSTRND\b/gi, 'NOSTRAND')
+            .replace(/\bRGRS\b/gi, 'ROGERS')
+            .replace(/\bMKR\b/gi, 'MEEKER')
+            .replace(/\bAV\b/gi, 'AVENUE')
+            .replace(/\bST\b/gi, 'STREET');
+
+          // Convert to lowercase and split on slash
+          const parts = withNormalizedAbbrev.toLowerCase().split('/');
+
+          // Process each street name
+          return parts.map(part => {
+            // Remove common suffixes and normalize spaces
+            return part
+              .replace(/(avenue|ave|av)$/g, '')
+              .replace(/(street|str|st)$/g, '')
+              .replace(/(road|rd)$/g, '')
+              .replace(/(place|pl)$/g, '')
+              .replace(/(boulevard|blvd)$/g, '')
+              .replace(/\s+/g, '')
+              .trim();
+          }).filter(Boolean);
+        };
+
+        // Get the normalized street names we're looking for
+        const targetStreets = normalizeIntoStreets(nearbyLine.closestStop.name);
+
+        // Try to find an exact street match first
+        let matchFound = false;
+        for (const stop of data.stops) {
+          // Skip stops that don't match the route type
+          if (isSBS) {
+            const isSBSStop = stop.direction.includes('SBS');
+            if (!isSBSStop) continue;
+          }
+
+          // For B48, check if it's in the right direction
+          if (isB48) {
+            const isCorrectDirection = stop.direction.includes('LEFFERTS GARDENS') ||
+              stop.direction.includes('GREENPOINT');
+            if (!isCorrectDirection) continue;
+          }
+
+          const currentStreets = normalizeIntoStreets(stop.name);
+
+          // Check if both streets match in either order
+          const streetsMatch =
+            (targetStreets[0] === currentStreets[0] && targetStreets[1] === currentStreets[1]) ||
+            (targetStreets[0] === currentStreets[1] && targetStreets[1] === currentStreets[0]);
+
+          if (streetsMatch) {
+            matchingStop = stop;
+            matchReason = 'exact street match';
+            matchFound = true;
+            break;
+          }
+        }
+
+        if (!matchFound) {
+          for (const stop of data.stops) {
+            // Skip stops that don't match the route type
+            if (isSBS) {
+              const isSBSStop = stop.direction.includes('SBS');
+              if (!isSBSStop) continue;
+            }
+
+            if (isB48) {
+              const isCorrectDirection = stop.direction.includes('LEFFERTS GARDENS') ||
+                stop.direction.includes('GREENPOINT');
+              if (!isCorrectDirection) continue;
+            }
+
+            const currentStreets = normalizeIntoStreets(stop.name);
+
+            const hasAllStreets = targetStreets.every(targetStreet =>
+              currentStreets.some(currentStreet =>
+                currentStreet.includes(targetStreet) || targetStreet.includes(currentStreet)
+              )
+            );
+
+            if (hasAllStreets) {
+              matchingStop = stop;
+              matchReason = 'partial street match';
+              matchFound = true;
+              break;
+            }
+          }
+        }
+
+        if (matchingStop) {
+          // First set the stops and directions
+          setStops(data.stops);
+
+          // Set directions first
+          if (data.directions && data.directions.length > 0) {
+            setDirections(data.directions);
+
+            // Find the direction that contains this stop
+            const stopDirection = data.directions.find((d: Direction) =>
+              data.stops.some((s: BusStop) =>
+                s.id === matchingStop.id && s.direction === d.name
+              )
+            );
+
+            // Set the direction that contains our matched stop
+            if (stopDirection) {
+              setSelectedDirection(stopDirection.id);
+            } else {
+              setSelectedDirection(data.directions[0].id);
+            }
+          }
+
+          // Now set the origin and update URL
+          setOriginId(matchingStop.id);
+
+          // Update URL with the bus line and origin
+          updateUrl({
+            busLine: line.id,
+            originId: matchingStop.id
+          });
+          return;
+        }
+      }
+
+      // If we don't have closest stop info or couldn't find the matching stop,
+      // fall back to calculating distances
+      const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(line.id)}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch bus stops');
+      }
+
+      const data = await response.json();
+      if (!data.stops || data.stops.length === 0) {
+        throw new Error('No stops found for this line');
+      }
+
+      // Find the closest stop
+      let closestStop = data.stops[0];
+      let minDistance = calculateDistance(
+        position.coords.latitude,
+        position.coords.longitude,
+        data.stops[0].lat,
+        data.stops[0].lon
+      );
+
+      for (const stop of data.stops) {
+        const distance = calculateDistance(
+          position.coords.latitude,
+          position.coords.longitude,
+          stop.lat,
+          stop.lon
+        );
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestStop = stop;
+        }
+      }
+
+      // Set the closest stop as the origin
+      setOriginId(closestStop.id);
+      setStops(data.stops);
+
+      // Set directions if available
+      if (data.directions && data.directions.length > 0) {
+        setDirections(data.directions);
+        setSelectedDirection(data.directions[0].id);
+      }
+
+      // Update URL with the bus line and origin
+      updateUrl({
+        busLine: line.id,
+        originId: closestStop.id
+      });
+
+    } catch (err) {
+      console.error('Error finding closest stop:', err);
+      // If there's an error, just fetch stops without setting an origin
+      fetchStopsForLine(line.id);
+    }
+  };
+
+  // Function to calculate distance between two points using the Haversine formula
+  const calculateDistance = (
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number
+  ): number => {
+    const R = 3959; // Earth's radius in miles
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
   };
 
   // Fetch stops for a selected bus line - wrapped in useCallback to prevent recreating on each render
@@ -269,7 +517,8 @@ const BusTrackerContent = () => {
       const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(lineId)}`, {
         signal: controller.signal,
         headers: {
-          'Cache-Control': 'no-cache',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
         },
       });
 
@@ -692,17 +941,12 @@ const BusTrackerContent = () => {
 
     // Simple sorting function that uses the API-provided sequence numbers
     const sortStopsBySequence = (stops: BusStop[]) => {
-      console.log('Sorting stops by sequence numbers provided by the API');
       return [...stops].sort((a, b) => a.sequence - b.sequence);
     };
 
     if (!direction) {
-      console.warn('No direction found with id:', selectedDirection);
-
       // If there are no directions at all, return all stops sorted by sequence
       if (directions.length === 0) {
-        console.log('No directions available, sorting all stops by sequence');
-
         // First group by direction, then sort each group by sequence
         const directionGroups: Record<string, BusStop[]> = {};
         stops.forEach(stop => {
@@ -729,7 +973,6 @@ const BusTrackerContent = () => {
       if (directions.length > 0) {
         const firstDirection = directions[0];
         setSelectedDirection(firstDirection.id);
-        console.log('Using first direction:', firstDirection.name);
 
         const filteredStops = stops.filter(s => s.direction === firstDirection.name);
         const sortedStops = sortStopsBySequence(filteredStops);
@@ -743,12 +986,9 @@ const BusTrackerContent = () => {
       return [];
     }
 
-    console.log('Using direction:', direction.name);
     const filteredStops = stops.filter(stop => stop.direction === direction.name);
 
     if (filteredStops.length === 0) {
-      console.warn('No stops found for direction:', direction.name);
-
       // If no stops match the exact direction name, try a more flexible approach
       const allDirectionNames = [...new Set(stops.map(s => s.direction))];
 
@@ -758,7 +998,6 @@ const BusTrackerContent = () => {
       );
 
       if (similarDirection) {
-        console.log('Found similar direction:', similarDirection);
         const similarStops = stops.filter(s => s.direction === similarDirection);
         const sortedStops = sortStopsBySequence(similarStops);
 
@@ -770,8 +1009,6 @@ const BusTrackerContent = () => {
 
       // If still no stops found, group by direction and sort each group
       if (stops.length > 0) {
-        console.log('Using all stops grouped by direction and sorted by sequence');
-
         // Group by direction first
         const directionGroups: Record<string, BusStop[]> = {};
         stops.forEach(stop => {
@@ -797,12 +1034,6 @@ const BusTrackerContent = () => {
     // Sort the filtered stops by sequence
     const sortedStops = sortStopsBySequence(filteredStops);
 
-    // Log the sorted stops and their sequence numbers for debugging
-    console.log('Stops for direction', direction.name, 'sorted by sequence:');
-    sortedStops.forEach(stop => {
-      console.log(`${stop.name}: sequence=${stop.sequence}`);
-    });
-
     return sortedStops.map(stop => ({
       value: stop.id,
       label: stop.name
@@ -827,23 +1058,33 @@ const BusTrackerContent = () => {
     setShowBusLineResults(false);
 
     try {
+      console.log('\n=== Starting Geolocation Process ===');
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
-          timeout: 5000,
+          timeout: 10000,
           maximumAge: 0
         });
       });
 
+      console.log('Got position:', position.coords);
       const { latitude, longitude } = position.coords;
-      const response = await fetch(`/api/bus-lines/nearby?lat=${latitude}&lon=${longitude}`);
+      const response = await fetch(`/api/bus-lines/nearby?lat=${latitude}&lon=${longitude}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
 
       if (!response.ok) {
         throw new Error('Failed to fetch nearby bus lines');
       }
 
       const data = await response.json();
+      console.log('Got nearby bus lines:', data);
+
       if (data.busLines && data.busLines.length > 0) {
+        console.log('Setting bus line results:', data.busLines);
         setBusLineResults(data.busLines);
         setShowBusLineResults(true);
       } else {
@@ -870,6 +1111,7 @@ const BusTrackerContent = () => {
       }
     } finally {
       setGeoLoading(false);
+      console.log('=== Geolocation Process Complete ===\n');
     }
   };
 
@@ -1101,8 +1343,7 @@ const BusTrackerContent = () => {
           title="View source on GitHub"
         >
           <svg height="16" width="16" viewBox="0 0 16 16" className="fill-current">
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-          </svg>
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />          </svg>
           <span>Source</span>
         </a>
       </div>
