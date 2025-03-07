@@ -625,6 +625,8 @@ const BusTrackerContent = () => {
       fetchStopsForLine(urlBusLine,
         urlOriginId || undefined,
         urlDestinationId || undefined);
+      // Only auto-expand settings when bus line is first loaded from URL
+      setIsConfigOpen(true);
     }
 
     // Only update origin/destination if they've changed
@@ -641,11 +643,6 @@ const BusTrackerContent = () => {
     if (urlCutoff === 'true') {
       setEnableCutoff(true);
       if (urlTime) setCutoffTime(urlTime);
-    }
-
-    // Auto-expand settings panel when bus line is passed in URL
-    if (urlBusLine) {
-      setIsConfigOpen(true);
     }
   }, [query]);
 
