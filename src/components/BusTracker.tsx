@@ -253,6 +253,38 @@ const BusTrackerContent = () => {
         });
       });
 
+      // Normalize a stop name into a set of street names
+      const normalizeIntoStreets = (name: string): string[] => {
+        // Remove common prefixes and normalize abbreviations
+        const withoutPrefix = name.replace(/^SBS\s+/, '').replace(/^[A-Z]\d+\s+/, '');
+
+        const withNormalizedAbbrev = withoutPrefix
+          .replace(/\bWLMSBRG\b/gi, 'WILLIAMSBURG')
+          .replace(/\bBRDG\b/gi, 'BRIDGE')
+          .replace(/\bPLZ\b/gi, 'PLAZA')
+          .replace(/\bNSTRND\b/gi, 'NOSTRAND')
+          .replace(/\bRGRS\b/gi, 'ROGERS')
+          .replace(/\bMKR\b/gi, 'MEEKER')
+          .replace(/\bAV\b/gi, 'AVENUE')
+          .replace(/\bST\b/gi, 'STREET');
+
+        // Convert to lowercase and split on slash
+        const parts = withNormalizedAbbrev.toLowerCase().split('/');
+
+        // Process each street name
+        return parts.map(part => {
+          // Remove common suffixes and normalize spaces
+          return part
+            .replace(/(avenue|ave|av)$/g, '')
+            .replace(/(street|str|st)$/g, '')
+            .replace(/(road|rd)$/g, '')
+            .replace(/(place|pl)$/g, '')
+            .replace(/(boulevard|blvd)$/g, '')
+            .replace(/\s+/g, '')
+            .trim();
+        }).filter(Boolean);
+      };
+
       // If this is a nearby bus line, it already has the closest stop info
       if ('closestStop' in line) {
         const nearbyLine = line as NearbyBusLine;
@@ -274,52 +306,28 @@ const BusTrackerContent = () => {
           throw new Error('No stops found for this line');
         }
 
+        // Set directions first if available
+        if (data.directions && data.directions.length > 0) {
+          setDirections(data.directions);
+          setSelectedDirection(data.directions[0].id);
+        }
+
         // Find the stop that matches the closest stop name
         let matchingStop = null;
         let matchReason = '';
+        let matchFound = false;
+
+        const targetStreets = normalizeIntoStreets(nearbyLine.closestStop.name);
 
         // Special handling for B48 and B44-SBS
         const isSBS = line.id.includes('B44+');
         const isB48 = line.id.includes('B48');
 
-        // Normalize a stop name into a set of street names
-        const normalizeIntoStreets = (name: string): string[] => {
-          // Remove common prefixes and normalize abbreviations
-          const withoutPrefix = name.replace(/^SBS\s+/, '').replace(/^[A-Z]\d+\s+/, '');
+        // Get stops for the current direction
+        const currentDirection = data.directions[0];
+        const directionStops = data.stops.filter((s: BusStop) => s.direction === currentDirection.name);
 
-          const withNormalizedAbbrev = withoutPrefix
-            .replace(/\bWLMSBRG\b/gi, 'WILLIAMSBURG')
-            .replace(/\bBRDG\b/gi, 'BRIDGE')
-            .replace(/\bPLZ\b/gi, 'PLAZA')
-            .replace(/\bNSTRND\b/gi, 'NOSTRAND')
-            .replace(/\bRGRS\b/gi, 'ROGERS')
-            .replace(/\bMKR\b/gi, 'MEEKER')
-            .replace(/\bAV\b/gi, 'AVENUE')
-            .replace(/\bST\b/gi, 'STREET');
-
-          // Convert to lowercase and split on slash
-          const parts = withNormalizedAbbrev.toLowerCase().split('/');
-
-          // Process each street name
-          return parts.map(part => {
-            // Remove common suffixes and normalize spaces
-            return part
-              .replace(/(avenue|ave|av)$/g, '')
-              .replace(/(street|str|st)$/g, '')
-              .replace(/(road|rd)$/g, '')
-              .replace(/(place|pl)$/g, '')
-              .replace(/(boulevard|blvd)$/g, '')
-              .replace(/\s+/g, '')
-              .trim();
-          }).filter(Boolean);
-        };
-
-        // Get the normalized street names we're looking for
-        const targetStreets = normalizeIntoStreets(nearbyLine.closestStop.name);
-
-        // Try to find an exact street match first
-        let matchFound = false;
-        for (const stop of data.stops) {
+        for (const stop of directionStops) {
           // Skip stops that don't match the route type
           if (isSBS) {
             const isSBSStop = stop.direction.includes('SBS');
@@ -349,58 +357,34 @@ const BusTrackerContent = () => {
         }
 
         if (!matchFound) {
-          for (const stop of data.stops) {
-            // Skip stops that don't match the route type
-            if (isSBS) {
-              const isSBSStop = stop.direction.includes('SBS');
-              if (!isSBSStop) continue;
-            }
+          // If no exact match found in current direction, find closest stop by distance
+          let closestStop = directionStops[0];
+          let minDistance = calculateDistance(
+            position.coords.latitude,
+            position.coords.longitude,
+            closestStop.lat,
+            closestStop.lon
+          );
 
-            if (isB48) {
-              const isCorrectDirection = stop.direction.includes('LEFFERTS GARDENS') ||
-                stop.direction.includes('GREENPOINT');
-              if (!isCorrectDirection) continue;
-            }
-
-            const currentStreets = normalizeIntoStreets(stop.name);
-
-            const hasAllStreets = targetStreets.every(targetStreet =>
-              currentStreets.some(currentStreet =>
-                currentStreet.includes(targetStreet) || targetStreet.includes(currentStreet)
-              )
+          for (const stop of directionStops) {
+            const distance = calculateDistance(
+              position.coords.latitude,
+              position.coords.longitude,
+              stop.lat,
+              stop.lon
             );
-
-            if (hasAllStreets) {
-              matchingStop = stop;
-              matchReason = 'partial street match';
-              matchFound = true;
-              break;
+            if (distance < minDistance) {
+              minDistance = distance;
+              closestStop = stop;
             }
           }
+          matchingStop = closestStop;
+          matchReason = 'closest by distance';
         }
 
         if (matchingStop) {
-          // First set the stops and directions
+          // Set the stops
           setStops(data.stops);
-
-          // Set directions first
-          if (data.directions && data.directions.length > 0) {
-            setDirections(data.directions);
-
-            // Find the direction that contains this stop
-            const stopDirection = data.directions.find((d: Direction) =>
-              data.stops.some((s: BusStop) =>
-                s.id === matchingStop.id && s.direction === d.name
-              )
-            );
-
-            // Set the direction that contains our matched stop
-            if (stopDirection) {
-              setSelectedDirection(stopDirection.id);
-            } else {
-              setSelectedDirection(data.directions[0].id);
-            }
-          }
 
           // Now set the origin and update URL
           setOriginId(matchingStop.id);
@@ -432,43 +416,56 @@ const BusTrackerContent = () => {
         throw new Error('No stops found for this line');
       }
 
-      // Find the closest stop
-      let closestStop = data.stops[0];
-      let minDistance = calculateDistance(
-        position.coords.latitude,
-        position.coords.longitude,
-        data.stops[0].lat,
-        data.stops[0].lon
-      );
-
-      for (const stop of data.stops) {
-        const distance = calculateDistance(
-          position.coords.latitude,
-          position.coords.longitude,
-          stop.lat,
-          stop.lon
-        );
-        if (distance < minDistance) {
-          minDistance = distance;
-          closestStop = stop;
-        }
-      }
-
-      // Set the closest stop as the origin
-      setOriginId(closestStop.id);
-      setStops(data.stops);
-
       // Set directions if available
       if (data.directions && data.directions.length > 0) {
         setDirections(data.directions);
         setSelectedDirection(data.directions[0].id);
-      }
 
-      // Update URL with the bus line and origin
-      updateUrl({
-        busLine: line.id,
-        originId: closestStop.id
-      });
+        // Get stops for the current direction
+        const currentDirection = data.directions[0];
+        const directionStops = data.stops.filter((s: BusStop) => s.direction === currentDirection.name);
+
+        // Find the closest stop in the current direction
+        let closestStop = directionStops[0];
+        let minDistance = calculateDistance(
+          position.coords.latitude,
+          position.coords.longitude,
+          directionStops[0].lat,
+          directionStops[0].lon
+        );
+
+        for (const stop of directionStops) {
+          const distance = calculateDistance(
+            position.coords.latitude,
+            position.coords.longitude,
+            stop.lat,
+            stop.lon
+          );
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestStop = stop;
+          }
+        }
+
+        // Set the closest stop as the origin
+        setOriginId(closestStop.id);
+        setStops(data.stops);
+
+        // Update URL with the bus line and origin
+        updateUrl({
+          busLine: line.id,
+          originId: closestStop.id
+        });
+      } else {
+        // If no directions available, fall back to old behavior
+        setStops(data.stops);
+        const closestStop = data.stops[0];
+        setOriginId(closestStop.id);
+        updateUrl({
+          busLine: line.id,
+          originId: closestStop.id
+        });
+      }
 
     } catch (err) {
       console.error('Error finding closest stop:', err);
@@ -728,30 +725,60 @@ const BusTrackerContent = () => {
       if (currentDirIndex !== -1) {
         // Get the opposite direction index
         const newDirIndex = (currentDirIndex + 1) % directions.length;
-        // Update direction synchronously
-        setSelectedDirection(directions[newDirIndex].id);
-      }
-    }
+        const newDirection = directions[newDirIndex];
 
-    // Update state with swapped values immediately
-    setOriginId(tempDestination);
-    setDestinationId(tempOrigin);
+        // Find the current stops
+        const currentOriginStop = stops.find(s => s.id === tempOrigin);
+        const currentDestStop = stops.find(s => s.id === tempDestination);
+
+        // Get stops for the new direction
+        const newDirectionStops = stops.filter(s => s.direction === newDirection.name);
+
+        // Function to find closest stop in new direction
+        const findClosestStop = (lat: number, lon: number) => {
+          let closestStop = newDirectionStops[0];
+          let minDistance = calculateDistance(lat, lon, closestStop.lat, closestStop.lon);
+
+          for (const stop of newDirectionStops) {
+            const distance = calculateDistance(lat, lon, stop.lat, stop.lon);
+            if (distance < minDistance) {
+              minDistance = distance;
+              closestStop = stop;
+            }
+          }
+          return closestStop;
+        };
+
+        // Find closest stops in new direction
+        let newOrigin = '';
+        let newDestination = '';
+
+        if (currentOriginStop && currentDestStop) {
+          const closestToOrigin = findClosestStop(currentDestStop.lat, currentDestStop.lon);
+          const closestToDest = findClosestStop(currentOriginStop.lat, currentOriginStop.lon);
+          newOrigin = closestToOrigin.id;
+          newDestination = closestToDest.id;
+        }
+
+        // Update direction and stops
+        setSelectedDirection(newDirection.id);
+        setOriginId(newOrigin);
+        setDestinationId(newDestination);
+      }
+    } else {
+      // If there's only one direction, just swap the stops
+      setOriginId(tempDestination);
+      setDestinationId(tempOrigin);
+    }
 
     // Force a recomputation of currentStops
     setForceUpdate(prev => prev + 1);
 
     // Update URL with swapped values
     updateUrl({
-      originId: tempDestination,
-      destinationId: tempOrigin
+      originId: originId,
+      destinationId: destinationId
     });
-
-    // Ensure bus line info is preserved before fetching stops
-    setBusLineId(currentBusLineId);
-    setBusLineSearch(currentBusLineSearch);
-
-    // Fetch new stops for the new direction, but preserve our swapped selections
-    fetchStopsForLine(currentBusLineId, tempDestination, tempOrigin);
   };
 
   const handleCutoffChange = (value: boolean) => {
@@ -1208,6 +1235,31 @@ const BusTrackerContent = () => {
               </div>
             )}
 
+            {busLineId && directions.length > 0 && (
+              <div className="mb-3">
+                <label className="text-sm mb-1 block">Direction</label>
+                <select
+                  value={selectedDirection}
+                  onChange={(e) => {
+                    const newDirection = e.target.value;
+                    setSelectedDirection(newDirection);
+                    // Clear current selections as they might not exist in new direction
+                    setOriginId('');
+                    setDestinationId('');
+                    // Force update of stops list
+                    setForceUpdate(prev => prev + 1);
+                  }}
+                  className="text-gray-800 rounded px-2 py-1 w-full"
+                >
+                  {directions.map((direction) => (
+                    <option key={direction.id} value={direction.id}>
+                      {direction.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="flex space-x-2">
               <div className="flex-1">
                 <label className="text-sm mb-1 block">Origin</label>
@@ -1340,7 +1392,7 @@ const BusTrackerContent = () => {
           title="View source on GitHub"
         >
           <svg height="16" width="16" viewBox="0 0 16 16" className="fill-current">
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
           </svg>
           <span>Source</span>
         </a>
