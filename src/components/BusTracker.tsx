@@ -716,8 +716,6 @@ const BusTrackerContent = () => {
     // Store current values
     const tempOrigin = originId;
     const tempDestination = destinationId;
-    const currentBusLineSearch = currentBusLineRef.current.search;
-    const currentBusLineId = currentBusLineRef.current.id;
 
     // First, update the direction if we have multiple directions
     if (directions.length > 1) {
@@ -733,6 +731,11 @@ const BusTrackerContent = () => {
 
         // Get stops for the new direction
         const newDirectionStops = stops.filter(s => s.direction === newDirection.name);
+
+        if (newDirectionStops.length === 0) {
+          console.warn('No stops found for new direction:', newDirection.name);
+          return;
+        }
 
         // Function to find closest stop in new direction
         const findClosestStop = (lat: number, lon: number) => {
@@ -750,35 +753,39 @@ const BusTrackerContent = () => {
         };
 
         // Find closest stops in new direction
-        let newOrigin = '';
-        let newDestination = '';
-
         if (currentOriginStop && currentDestStop) {
           const closestToOrigin = findClosestStop(currentDestStop.lat, currentDestStop.lon);
           const closestToDest = findClosestStop(currentOriginStop.lat, currentOriginStop.lon);
-          newOrigin = closestToOrigin.id;
-          newDestination = closestToDest.id;
-        }
 
-        // Update direction and stops
-        setSelectedDirection(newDirection.id);
-        setOriginId(newOrigin);
-        setDestinationId(newDestination);
+          // Update direction and stops
+          setSelectedDirection(newDirection.id);
+          setOriginId(closestToOrigin.id);
+          setDestinationId(closestToDest.id);
+
+          // Force a recomputation of currentStops
+          setForceUpdate(prev => prev + 1);
+
+          // Update URL with new values
+          updateUrl({
+            originId: closestToOrigin.id,
+            destinationId: closestToDest.id
+          });
+        }
       }
     } else {
       // If there's only one direction, just swap the stops
       setOriginId(tempDestination);
       setDestinationId(tempOrigin);
+
+      // Force a recomputation of currentStops
+      setForceUpdate(prev => prev + 1);
+
+      // Update URL with swapped values
+      updateUrl({
+        originId: tempDestination,
+        destinationId: tempOrigin
+      });
     }
-
-    // Force a recomputation of currentStops
-    setForceUpdate(prev => prev + 1);
-
-    // Update URL with swapped values
-    updateUrl({
-      originId: originId,
-      destinationId: destinationId
-    });
   };
 
   const handleCutoffChange = (value: boolean) => {
@@ -794,13 +801,117 @@ const BusTrackerContent = () => {
   };
 
   const handleOriginChange = (newOriginId: string) => {
-    setOriginId(newOriginId);
-    updateUrl({ originId: newOriginId });
+    // If no destination is selected yet, just set the origin
+    if (!destinationId) {
+      setOriginId(newOriginId);
+      updateUrl({ originId: newOriginId });
+      return;
+    }
+
+    // Find the stops in the current direction
+    const direction = directions.find(d => d.id === selectedDirection);
+    if (!direction) return;
+
+    const newOriginStop = stops.find(s => s.id === newOriginId && s.direction === direction.name);
+    const currentDestStop = stops.find(s => s.id === destinationId && s.direction === direction.name);
+
+    if (!newOriginStop || !currentDestStop) return;
+
+    // If the new origin is after the destination in the sequence, we need to change direction
+    if (newOriginStop.sequence > currentDestStop.sequence && directions.length > 1) {
+      // Find the opposite direction
+      const currentDirIndex = directions.findIndex(d => d.id === selectedDirection);
+      const newDirIndex = (currentDirIndex + 1) % directions.length;
+      const newDirection = directions[newDirIndex];
+
+      // Get stops in the new direction
+      const newDirectionStops = stops.filter(s => s.direction === newDirection.name);
+
+      // Find the corresponding stops in the new direction
+      const originInNewDir = newDirectionStops.find(s =>
+        calculateDistance(s.lat, s.lon, newOriginStop.lat, newOriginStop.lon) < 0.1
+      );
+      const destInNewDir = newDirectionStops.find(s =>
+        calculateDistance(s.lat, s.lon, currentDestStop.lat, currentDestStop.lon) < 0.1
+      );
+
+      if (originInNewDir && destInNewDir) {
+        setSelectedDirection(newDirection.id);
+        setOriginId(originInNewDir.id);
+        setDestinationId(destInNewDir.id);
+        setForceUpdate(prev => prev + 1);
+        updateUrl({
+          originId: originInNewDir.id,
+          destinationId: destInNewDir.id
+        });
+      } else {
+        // If we can't find matching stops in the new direction, just set the origin
+        setOriginId(newOriginId);
+        updateUrl({ originId: newOriginId });
+      }
+    } else {
+      // If stops are in correct sequence or we only have one direction,
+      // just set the new origin
+      setOriginId(newOriginId);
+      updateUrl({ originId: newOriginId });
+    }
   };
 
   const handleDestinationChange = (newDestinationId: string) => {
-    setDestinationId(newDestinationId);
-    updateUrl({ destinationId: newDestinationId });
+    // If no origin is selected yet, just set the destination
+    if (!originId) {
+      setDestinationId(newDestinationId);
+      updateUrl({ destinationId: newDestinationId });
+      return;
+    }
+
+    // Find the stops in the current direction
+    const direction = directions.find(d => d.id === selectedDirection);
+    if (!direction) return;
+
+    const currentOriginStop = stops.find(s => s.id === originId && s.direction === direction.name);
+    const newDestStop = stops.find(s => s.id === newDestinationId && s.direction === direction.name);
+
+    if (!currentOriginStop || !newDestStop) return;
+
+    // If the new destination is before the origin in the sequence, we need to change direction
+    if (newDestStop.sequence < currentOriginStop.sequence && directions.length > 1) {
+      // Find the opposite direction
+      const currentDirIndex = directions.findIndex(d => d.id === selectedDirection);
+      const newDirIndex = (currentDirIndex + 1) % directions.length;
+      const newDirection = directions[newDirIndex];
+
+      // Get stops in the new direction
+      const newDirectionStops = stops.filter(s => s.direction === newDirection.name);
+
+      // Find the corresponding stops in the new direction
+      const originInNewDir = newDirectionStops.find(s =>
+        calculateDistance(s.lat, s.lon, currentOriginStop.lat, currentOriginStop.lon) < 0.1
+      );
+      const destInNewDir = newDirectionStops.find(s =>
+        calculateDistance(s.lat, s.lon, newDestStop.lat, newDestStop.lon) < 0.1
+      );
+
+      if (originInNewDir && destInNewDir) {
+        setSelectedDirection(newDirection.id);
+        setOriginId(originInNewDir.id);
+        setDestinationId(destInNewDir.id);
+        setForceUpdate(prev => prev + 1);
+        updateUrl({
+          originId: originInNewDir.id,
+          destinationId: destInNewDir.id
+        });
+      } else {
+        // If we can't find matching stops in the new direction, just set the destination
+        setDestinationId(newDestinationId);
+        updateUrl({ destinationId: newDestinationId });
+      }
+    } else {
+      // If stops are in correct sequence or we only have one direction,
+      // just set the new destination
+      setDestinationId(newDestinationId);
+      updateUrl({ destinationId: newDestinationId });
+    }
   };
 
   const handleReset = () => {
