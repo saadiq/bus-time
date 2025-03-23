@@ -16,11 +16,11 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@types/node": "^20.17.24",
-    "@types/react": "^18.3.18",
+    "@types/node": "^20.17.25",
+    "@types/react": "^18.3.19",
     "@types/react-dom": "^18.3.5",
-    "@typescript-eslint/eslint-plugin": "^8.26.0",
-    "@typescript-eslint/parser": "^8.26.0",
+    "@typescript-eslint/eslint-plugin": "^8.27.0",
+    "@typescript-eslint/parser": "^8.27.0",
     "eslint": "^8.57.1",
     "eslint-config-next": "15.0.3",
     "postcss": "^8.5.3",
