@@ -1,25 +1,13 @@
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
-import fs from "fs";
-import path from "path";
+import { validateBusLineId, ValidationError, isRateLimited, getClientId } from '@/lib/validation';
+import { BusStop, Direction, ApiResponse } from '@/types';
 
 // Route Segment Config for Next.js caching
 export const revalidate = 1800; // 30 minutes in seconds
 
-interface BusStop {
-  id: string;
-  code: string;
-  name: string;
-  direction: string;
-  sequence: number;
-  lat: number;
-  lon: number;
-}
-
-interface Direction {
-  id: string;
-  name: string;
-}
+// Rate limiting storage
+const requestMap = new Map<string, number[]>();
 
 interface StopReference {
   id: string;
@@ -37,7 +25,7 @@ interface StopGroup {
   [key: string]: unknown;
 }
 
-interface ApiResponse {
+interface MTAApiResponse {
   code?: number;
   text?: string;
   data?: {
@@ -58,18 +46,43 @@ const individualStopsFetched: Record<string, StopReference> = {};
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const lineId = searchParams.get("lineId");
-
-    if (!lineId) {
+    // Rate limiting
+    const clientId = getClientId(request);
+    if (isRateLimited(requestMap, clientId, 60)) {
       return NextResponse.json(
-        { error: "Bus line ID is required" },
-        { status: 400 }
+        { success: false, error: 'Rate limit exceeded. Please try again later.' },
+        { status: 429 }
+      );
+    }
+
+    // Input validation
+    const searchParams = request.nextUrl.searchParams;
+    const rawLineId = searchParams.get("lineId");
+
+    let lineId: string;
+    try {
+      lineId = validateBusLineId(rawLineId);
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        return NextResponse.json(
+          { success: false, error: error.message },
+          { status: 400 }
+        );
+      }
+      throw error;
+    }
+
+    // Validate API key exists
+    const apiKey = process.env.MTA_API_KEY;
+    if (!apiKey) {
+      console.error('MTA_API_KEY environment variable is not set');
+      return NextResponse.json(
+        { success: false, error: 'Service temporarily unavailable' },
+        { status: 503 }
       );
     }
 
     // Use the OneBusAway API to get all stops for a bus line
-    const apiKey = process.env.MTA_API_KEY || "";
     const url = `https://bustime.mta.info/api/where/stops-for-route/${encodeURIComponent(
       lineId
     )}.json?key=${apiKey}&includePolylines=false&includeReferences=true&version=2`;
@@ -96,7 +109,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const data: ApiResponse = await response.json();
+    const data: MTAApiResponse = await response.json();
 
     // Log the raw response data (excluding sensitive information)
     console.log("Raw API Response:", {
@@ -345,23 +358,37 @@ export async function GET(request: NextRequest) {
           0
         ),
       });
-      return NextResponse.json(
-        { error: "No stops could be extracted for this route" },
-        { status: 404 }
-      );
+      const errorResponse: ApiResponse<never> = {
+        success: false,
+        error: "No stops could be extracted for this route"
+      };
+      return NextResponse.json(errorResponse, { status: 404 });
     }
 
     // Return the results
-    return NextResponse.json({
-      routeId: lineId,
-      directions: directionsArray,
-      stops: stopsArray,
-    });
+    const apiResponse: ApiResponse<{ routeId: string; directions: Direction[]; stops: BusStop[] }> = {
+      success: true,
+      data: {
+        routeId: lineId,
+        directions: directionsArray,
+        stops: stopsArray,
+      }
+    };
+    
+    return NextResponse.json(apiResponse);
   } catch (error) {
-    console.error("Error in bus-stops API route:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch bus stops" },
-      { status: 500 }
-    );
+    console.error("Error in bus-stops API route:", {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      url: request.url,
+      lineId: 'validation-failed',
+      timestamp: new Date().toISOString()
+    });
+    
+    const errorResponse: ApiResponse<never> = {
+      success: false,
+      error: "Failed to fetch bus stops"
+    };
+    
+    return NextResponse.json(errorResponse, { status: 500 });
   }
 }

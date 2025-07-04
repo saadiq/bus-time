@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+
+# Security: Disallow access to sensitive paths
+Disallow: /api/
+Disallow: /.env*
+Disallow: /debug/
+Disallow: /_next/
+Disallow: /admin/
+
+# Sitemap
+Sitemap: https://bus-time-ochre.vercel.app/sitemap.xml

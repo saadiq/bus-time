@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { validateCoordinates, ValidationError, isRateLimited, getClientId } from '@/lib/validation';
+import { NearbyBusLine, ApiResponse } from '@/types';
 
 interface MTAStop {
   id: string;
@@ -22,13 +25,8 @@ interface MTARoute {
   agencyId: string;
 }
 
-interface RouteWithDistance extends MTARoute {
-  distance: number;
-  closestStop: {
-    name: string;
-    distance: number;
-  } | null;
-}
+// Rate limiting storage
+const requestMap = new Map<string, number[]>();
 
 // Function to calculate distance between two points using the Haversine formula
 function calculateDistance(
@@ -50,22 +48,50 @@ function calculateDistance(
   return R * c;
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const lat = parseFloat(searchParams.get("lat") || "");
-    const lon = parseFloat(searchParams.get("lon") || "");
-
-    if (isNaN(lat) || isNaN(lon)) {
+    // Rate limiting
+    const clientId = getClientId(request);
+    if (isRateLimited(requestMap, clientId, 30)) { // Lower limit for geolocation
       return NextResponse.json(
-        { error: "Invalid coordinates" },
-        { status: 400 }
+        { success: false, error: 'Rate limit exceeded. Please try again later.' },
+        { status: 429 }
+      );
+    }
+
+    // Input validation
+    const { searchParams } = new URL(request.url);
+    const rawLat = searchParams.get("lat");
+    const rawLon = searchParams.get("lon");
+
+    let coordinates;
+    try {
+      coordinates = validateCoordinates(rawLat, rawLon);
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        return NextResponse.json(
+          { success: false, error: error.message },
+          { status: 400 }
+        );
+      }
+      throw error;
+    }
+
+    const { lat, lon } = coordinates;
+
+    // Validate API key exists
+    const apiKey = process.env.MTA_API_KEY;
+    if (!apiKey) {
+      console.error('MTA_API_KEY environment variable is not set');
+      return NextResponse.json(
+        { success: false, error: 'Service temporarily unavailable' },
+        { status: 503 }
       );
     }
 
     // First, get all bus stops within 500 meters of the location
     const stopsResponse = await fetch(
-      `http://bustime.mta.info/api/where/stops-for-location.json?lat=${lat}&lon=${lon}&radius=500&key=${process.env.MTA_API_KEY}`,
+      `https://bustime.mta.info/api/where/stops-for-location.json?lat=${lat}&lon=${lon}&radius=500&key=${apiKey}`,
       {
         headers: {
           "Cache-Control": "no-cache",
@@ -117,7 +143,7 @@ export async function GET(request: Request) {
     }
 
     // Convert routes to array with distance information
-    const routes: RouteWithDistance[] = [];
+    const routes: NearbyBusLine[] = [];
     for (const [routeId, route] of routeMap) {
       const stops = stopsByRoute.get(routeId) || [];
       if (stops.length > 0) {
@@ -144,16 +170,26 @@ export async function GET(request: Request) {
 
     if (nearbyRoutes.length === 0) {
       console.log("No valid routes found after processing");
-    } else {
-      console.log("Found nearby routes:", nearbyRoutes);
     }
 
-    return NextResponse.json({ busLines: nearbyRoutes });
+    const apiResponse: ApiResponse<{ busLines: NearbyBusLine[] }> = {
+      success: true,
+      data: { busLines: nearbyRoutes }
+    };
+
+    return NextResponse.json(apiResponse);
   } catch (error) {
-    console.error("Error fetching nearby bus lines:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch nearby bus lines" },
-      { status: 500 }
-    );
+    console.error("Error fetching nearby bus lines:", {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      url: request.url,
+      timestamp: new Date().toISOString()
+    });
+    
+    const errorResponse: ApiResponse<never> = {
+      success: false,
+      error: "Failed to fetch nearby bus lines"
+    };
+    
+    return NextResponse.json(errorResponse, { status: 500 });
   }
 }

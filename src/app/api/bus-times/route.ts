@@ -1,6 +1,11 @@
 // src/app/api/bus-times/route.ts
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
+import { validateBusLineId, validateStopId, ValidationError, isRateLimited, getClientId } from '@/lib/validation';
+import { BusData, ApiResponse } from '@/types';
+
+// Rate limiting storage
+const requestMap = new Map<string, number[]>();
 
 const _MTA_API_BASE = "https://bustime.mta.info/api/siri/stop-monitoring.json";
 const _DEFAULT_ORIGIN_STOP_ID = "MTA_304213"; // Gates-Bedford
@@ -162,16 +167,34 @@ const _estimateTripDuration = (
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const busLine = searchParams.get("busLine");
-    const originId = searchParams.get("originId");
-    const destinationId = searchParams.get("destinationId");
-
-    if (!busLine || !originId || !destinationId) {
+    // Rate limiting
+    const clientId = getClientId(request);
+    if (isRateLimited(requestMap, clientId, 120)) { // Higher limit for real-time data
       return NextResponse.json(
-        { error: "Missing required parameters" },
-        { status: 400 }
+        { success: false, error: 'Rate limit exceeded. Please try again later.' },
+        { status: 429 }
       );
+    }
+
+    // Input validation
+    const searchParams = request.nextUrl.searchParams;
+    const rawBusLine = searchParams.get("busLine");
+    const rawOriginId = searchParams.get("originId");
+    const rawDestinationId = searchParams.get("destinationId");
+
+    let busLine: string, originId: string, destinationId: string;
+    try {
+      busLine = validateBusLineId(rawBusLine);
+      originId = validateStopId(rawOriginId);
+      destinationId = validateStopId(rawDestinationId);
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        return NextResponse.json(
+          { success: false, error: error.message },
+          { status: 400 }
+        );
+      }
+      throw error;
     }
 
     // Fetch origin stop info
@@ -219,8 +242,17 @@ export async function GET(request: NextRequest) {
       // Record the start time
       const _startTime = Date.now();
 
+      // Validate API key exists
+      const apiKey = process.env.MTA_API_KEY;
+      if (!apiKey) {
+        console.error('MTA_API_KEY environment variable is not set');
+        return NextResponse.json(
+          { success: false, error: 'Service temporarily unavailable' },
+          { status: 503 }
+        );
+      }
+
       // Use the MTA Bus Time API to get real-time arrivals
-      const apiKey = process.env.MTA_API_KEY || "";
       const url = `https://bustime.mta.info/api/siri/stop-monitoring.json?key=${apiKey}&version=2&OperatorRef=MTA&MonitoringRef=${encodeURIComponent(
         originId
       )}&LineRef=${encodeURIComponent(
@@ -465,32 +497,56 @@ export async function GET(request: NextRequest) {
         };
       });
 
-      return NextResponse.json({
+      const busData: BusData = {
         originName,
         destinationName,
         buses,
         hasError: false,
-      });
+      };
+
+      const apiResponse: ApiResponse<BusData> = {
+        success: true,
+        data: busData
+      };
+
+      return NextResponse.json(apiResponse);
     } catch (error) {
-      console.error("Error fetching bus times:", error);
-      return NextResponse.json(
-        {
-          hasError: true,
-          errorMessage: "Failed to fetch bus times",
-          buses: [],
-        },
-        { status: 500 }
-      );
+      console.error("Error fetching bus times:", {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        url: request.url,
+        busLine,
+        originId,
+        destinationId,
+        timestamp: new Date().toISOString()
+      });
+      
+      const errorData: BusData = {
+        originName: 'Unknown',
+        destinationName: 'Unknown',
+        buses: [],
+        hasError: true,
+        errorMessage: "Failed to fetch bus times"
+      };
+      
+      const errorResponse: ApiResponse<BusData> = {
+        success: false,
+        error: "Failed to fetch bus times"
+      };
+      
+      return NextResponse.json(errorResponse, { status: 500 });
     }
   } catch (error) {
-    console.error("Error fetching bus times:", error);
-    return NextResponse.json(
-      {
-        hasError: true,
-        errorMessage: "Failed to fetch bus times",
-        buses: [],
-      },
-      { status: 500 }
-    );
+    console.error("Error in bus-times API:", {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      url: request.url,
+      timestamp: new Date().toISOString()
+    });
+    
+    const errorResponse: ApiResponse<never> = {
+      success: false,
+      error: "Failed to fetch bus times"
+    };
+    
+    return NextResponse.json(errorResponse, { status: 500 });
   }
 }

@@ -1,64 +1,18 @@
 "use client";
 
-import React, { useState, useEffect, Suspense, useRef, useCallback } from 'react';
+import React, { useEffect, Suspense, useRef, useCallback } from 'react';
 import { Switch } from '@headlessui/react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { BusLine, BusStop, BusResponse, NearbyBusLine } from '@/types';
+import { useBusTracker } from '@/hooks/useBusTracker';
+import { 
+  useDistanceCalculation, 
+  useDirectionStops, 
+  useBusStatus, 
+  useTimeFormatting,
+  useStopMatching 
+} from '@/hooks/useMemoizedComputations';
 
-interface BusArrival {
-  vehicleId: string;
-  originArrival: Date;
-  stopsAway: number;
-  destinationArrival: Date | null;
-  destination: string;
-  isEstimated: boolean;
-}
-
-interface BusData {
-  originName: string;
-  destinationName: string;
-  buses: BusResponse[];
-}
-
-interface BusResponse {
-  vehicleRef: string;
-  originArrival: string;
-  originStopsAway: number;
-  destinationArrival: string | null;
-  proximity: string;
-  destination: string;
-  isEstimated: boolean;
-}
-
-interface BusLine {
-  id: string;
-  shortName: string;
-  longName: string;
-  description: string;
-  agencyId: string;
-}
-
-interface BusStop {
-  id: string;
-  code: string;
-  name: string;
-  direction: string;
-  sequence: number;
-  lat: number;
-  lon: number;
-}
-
-interface Direction {
-  id: string;
-  name: string;
-}
-
-interface NearbyBusLine extends BusLine {
-  distance: number;
-  closestStop: {
-    name: string;
-    distance: number;
-  };
-}
 
 const POLLING_INTERVAL = 30000; // 30 seconds
 const DEBOUNCE_DELAY = 300; // ms for debouncing typeahead search
@@ -66,40 +20,63 @@ const DEBOUNCE_DELAY = 300; // ms for debouncing typeahead search
 const BusTrackerContent = () => {
   const router = useRouter();
   const query = useSearchParams();
+  const { state, actions } = useBusTracker();
+  
+  // Destructure state for easier access
+  const {
+    arrivals, error, busStopError, loading, data, cutoffTime, enableCutoff,
+    lastRefresh, nextRefreshIn, busLineSearch, busLineResults, busLineLoading,
+    showBusLineResults, stops, directions, selectedDirection, stopsLoading,
+    busLineId, originId, destinationId, isConfigOpen, forceUpdate,
+    geoLoading, geoError
+  } = state;
+  
+  // Destructure actions for easier access
+  const {
+    setArrivals, setError, setBusStopError, setLoading, setData, setCutoffTime,
+    setEnableCutoff, setLastRefresh, setNextRefreshIn, setBusLineSearch,
+    setBusLineResults, setBusLineLoading, setShowBusLineResults, setStops,
+    setDirections, setSelectedDirection, setStopsLoading, setBusLineId,
+    setOriginId, setDestinationId, setIsConfigOpen, forceUpdate: triggerForceUpdate,
+    setGeoLoading, setGeoError, batchUpdate, resetAll
+  } = actions;
+
+  // Refs for cleanup and functionality
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const [arrivals, setArrivals] = useState<BusArrival[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [busStopError, setBusStopError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<BusData | null>(null);
-  const [cutoffTime, setCutoffTime] = useState('08:00');
-  const [enableCutoff, setEnableCutoff] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [nextRefreshIn, setNextRefreshIn] = useState<number>(POLLING_INTERVAL / 1000);
-
-  // Route selection state
-  const [busLineSearch, setBusLineSearch] = useState('');
-  const [busLineResults, setBusLineResults] = useState<(BusLine | NearbyBusLine)[]>([]);
-  const [busLineLoading, setBusLineLoading] = useState(false);
-  const [showBusLineResults, setShowBusLineResults] = useState(false);
-
-  // Stops state
-  const [stops, setStops] = useState<BusStop[]>([]);
-  const [directions, setDirections] = useState<Direction[]>([]);
-  const [selectedDirection, setSelectedDirection] = useState<string>('');
-  const [stopsLoading, setStopsLoading] = useState(false);
-  const [busLineId, setBusLineId] = useState('');
-  const [originId, setOriginId] = useState('');
-  const [destinationId, setDestinationId] = useState('');
-  const [isConfigOpen, setIsConfigOpen] = useState(false);
-  const [forceUpdate, setForceUpdate] = useState(0);
-
-  // Add refs to track current bus line info
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  const titleIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const currentBusLineRef = useRef({ id: '', search: '' });
 
-  const [geoLoading, setGeoLoading] = useState(false);
-  const [geoError, setGeoError] = useState<string | null>(null);
+  // Memoized computations
+  const calculateDistance = useDistanceCalculation();
+  const currentStops = useDirectionStops(stops, directions, selectedDirection);
+  const getBusStatus = useBusStatus(enableCutoff, cutoffTime);
+  const { formatTime, getMinutesUntil } = useTimeFormatting();
+  const findMatchingStop = useStopMatching();
+
+  // Cleanup effect for all refs when component unmounts
+  useEffect(() => {
+    return () => {
+      // Clear all timeouts and intervals
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+      }
+      if (titleIntervalRef.current) {
+        clearInterval(titleIntervalRef.current);
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   // Load initial data
   useEffect(() => {
@@ -212,7 +189,8 @@ const BusTrackerContent = () => {
         return;
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
+      const data = responseData.success ? responseData.data : responseData;
 
       if (data.busLine) {
         setBusLineSearch(`${data.busLine.shortName} - ${data.busLine.longName}`);
@@ -221,6 +199,10 @@ const BusTrackerContent = () => {
         setBusLineSearch(`Bus ${fallbackName}`);
       }
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // Request was aborted, don't set error
+        return;
+      }
       console.error('Error fetching bus line details:', err);
       // Parse the lineId to create a reasonable display name
       let fallbackName = lineId;
@@ -301,7 +283,8 @@ const BusTrackerContent = () => {
           throw new Error('Failed to fetch bus stops');
         }
 
-        const data = await response.json();
+        const responseData = await response.json();
+        const data = responseData.success ? responseData.data : responseData;
         if (!data.stops || data.stops.length === 0) {
           throw new Error('No stops found for this line');
         }
@@ -411,7 +394,8 @@ const BusTrackerContent = () => {
         throw new Error('Failed to fetch bus stops');
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
+      const data = responseData.success ? responseData.data : responseData;
       if (!data.stops || data.stops.length === 0) {
         throw new Error('No stops found for this line');
       }
@@ -468,31 +452,16 @@ const BusTrackerContent = () => {
       }
 
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // Request was aborted, don't set error
+        return;
+      }
       console.error('Error finding closest stop:', err);
       // If there's an error, just fetch stops without setting an origin
       fetchStopsForLine(line.id);
     }
   };
 
-  // Function to calculate distance between two points using the Haversine formula
-  const calculateDistance = (
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number
-  ): number => {
-    const R = 3959; // Earth's radius in miles
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLon = ((lon2 - lon1) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  };
 
   // Fetch stops for a selected bus line - wrapped in useCallback to prevent recreating on each render
   const fetchStopsForLine = useCallback(async (lineId: string, preserveOriginId?: string, preserveDestinationId?: string) => {
@@ -507,12 +476,21 @@ const BusTrackerContent = () => {
 
     setStopsLoading(true);
     try {
-      // Add a timeout to the fetch request
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      // Cancel any previous request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      
+      // Create new abort controller
+      abortControllerRef.current = new AbortController();
+      const timeoutId = setTimeout(() => {
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+      }, 10000); // 10 second timeout
 
       const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(lineId)}`, {
-        signal: controller.signal,
+        signal: abortControllerRef.current.signal,
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache'
@@ -520,6 +498,7 @@ const BusTrackerContent = () => {
       });
 
       clearTimeout(timeoutId);
+      abortControllerRef.current = null;
 
       // Handle not-found errors more gracefully (API returns 404 when no stops are found)
       if (response.status === 404) {
@@ -539,7 +518,8 @@ const BusTrackerContent = () => {
         throw new Error(`Failed to fetch bus stops: ${response.status} ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
+      const data = responseData.success ? responseData.data : responseData;
 
       if (!data || !data.stops) {
         throw new Error('Invalid response format from bus stops API');
@@ -589,6 +569,10 @@ const BusTrackerContent = () => {
         setBusLineSearch(currentBusLineSearch);
       }
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // Request was aborted, don't set error
+        return;
+      }
       console.error('Error fetching bus stops:', err);
       setBusStopError('Error loading bus stops. Please try again.');
       setStops([]);
@@ -651,6 +635,7 @@ const BusTrackerContent = () => {
     // Clear any existing timeout
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
+      searchTimeoutRef.current = null;
     }
 
     // Set a new timeout to debounce the search
@@ -661,6 +646,7 @@ const BusTrackerContent = () => {
         setBusLineResults([]);
         setShowBusLineResults(false);
       }
+      searchTimeoutRef.current = null;
     }, DEBOUNCE_DELAY);
   };
 
@@ -671,10 +657,15 @@ const BusTrackerContent = () => {
       const response = await fetch(`/api/bus-lines?q=${encodeURIComponent(query)}`);
       if (!response.ok) throw new Error('Failed to fetch bus lines');
 
-      const data = await response.json();
+      const responseData = await response.json();
+      const data = responseData.success ? responseData.data : responseData;
       setBusLineResults(data.busLines || []);
       setShowBusLineResults(true);
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // Request was aborted, don't set error
+        return;
+      }
       console.error('Error searching bus lines:', err);
       setBusLineResults([]);
     } finally {
@@ -704,10 +695,13 @@ const BusTrackerContent = () => {
     updateTitle();
 
     // Set up an interval to check and update the title
-    const intervalId = setInterval(updateTitle, 100);
+    titleIntervalRef.current = setInterval(updateTitle, 100);
 
     return () => {
-      clearInterval(intervalId);
+      if (titleIntervalRef.current) {
+        clearInterval(titleIntervalRef.current);
+        titleIntervalRef.current = null;
+      }
     };
   }, []);
 
@@ -757,13 +751,13 @@ const BusTrackerContent = () => {
           const closestToOrigin = findClosestStop(currentDestStop.lat, currentDestStop.lon);
           const closestToDest = findClosestStop(currentOriginStop.lat, currentOriginStop.lon);
 
-          // Update direction and stops
-          setSelectedDirection(newDirection.id);
-          setOriginId(closestToOrigin.id);
-          setDestinationId(closestToDest.id);
-
-          // Force a recomputation of currentStops
-          setForceUpdate(prev => prev + 1);
+          // Batch update all related state
+          batchUpdate({
+            selectedDirection: newDirection.id,
+            originId: closestToOrigin.id,
+            destinationId: closestToDest.id,
+            forceUpdate: forceUpdate + 1
+          });
 
           // Update URL with new values
           updateUrl({
@@ -774,11 +768,11 @@ const BusTrackerContent = () => {
       }
     } else {
       // If there's only one direction, just swap the stops
-      setOriginId(tempDestination);
-      setDestinationId(tempOrigin);
-
-      // Force a recomputation of currentStops
-      setForceUpdate(prev => prev + 1);
+      batchUpdate({
+        originId: tempDestination,
+        destinationId: tempOrigin,
+        forceUpdate: forceUpdate + 1
+      });
 
       // Update URL with swapped values
       updateUrl({
@@ -839,7 +833,7 @@ const BusTrackerContent = () => {
         setSelectedDirection(newDirection.id);
         setOriginId(originInNewDir.id);
         setDestinationId(destInNewDir.id);
-        setForceUpdate(prev => prev + 1);
+        triggerForceUpdate();
         updateUrl({
           originId: originInNewDir.id,
           destinationId: destInNewDir.id
@@ -896,7 +890,7 @@ const BusTrackerContent = () => {
         setSelectedDirection(newDirection.id);
         setOriginId(originInNewDir.id);
         setDestinationId(destInNewDir.id);
-        setForceUpdate(prev => prev + 1);
+        triggerForceUpdate();
         updateUrl({
           originId: originInNewDir.id,
           destinationId: destInNewDir.id
@@ -915,22 +909,6 @@ const BusTrackerContent = () => {
   };
 
   const handleReset = () => {
-    // Clear form state
-    setBusLineId('');
-    setBusLineSearch('');
-    setOriginId('');
-    setDestinationId('');
-    setStops([]);
-    setDirections([]);
-    setSelectedDirection('');
-    setArrivals([]);
-    setData(null);
-    setError(null);
-    setBusStopError(null);
-    setStopsLoading(false); // Clear loading state
-    setBusLineResults([]); // Clear search results
-    setShowBusLineResults(false); // Hide search results dropdown
-
     // Clear bus line ref
     currentBusLineRef.current = { id: '', search: '' };
 
@@ -943,23 +921,10 @@ const BusTrackerContent = () => {
     // Clear URL parameters
     router.replace('/');
 
-    // Show settings panel
-    setIsConfigOpen(true);
+    // Reset all state using the reducer action
+    resetAll();
   };
 
-  const getBusStatus = (arrivalTime: Date) => {
-    if (!enableCutoff) return 'normal';
-
-    const [hours, minutes] = cutoffTime.split(':').map(Number);
-    const cutoff = new Date(arrivalTime);
-    cutoff.setHours(hours, minutes, 0, 0);
-
-    const warningThreshold = new Date(cutoff.getTime() - 20 * 60000); // 20 minutes before
-
-    if (arrivalTime > cutoff) return 'late';
-    if (arrivalTime >= warningThreshold) return 'warning';
-    return 'normal';
-  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -973,11 +938,21 @@ const BusTrackerContent = () => {
       try {
         setLoading(true);
         const url = `/api/bus-times?busLine=${encodeURIComponent(busLineId)}&originId=${encodeURIComponent(originId)}&destinationId=${encodeURIComponent(destinationId)}`;
-        const response = await fetch(url);
+        
+        // Cancel any previous request
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+        
+        abortControllerRef.current = new AbortController();
+        const response = await fetch(url, {
+          signal: abortControllerRef.current.signal
+        });
 
         if (!response.ok) throw new Error('Failed to fetch bus data');
 
-        const data = await response.json();
+        const responseData = await response.json();
+        const data = responseData.success ? responseData.data : responseData;
         setData(data);
 
         // Check if the API returned an error message
@@ -1030,7 +1005,12 @@ const BusTrackerContent = () => {
         }
 
         setLastRefresh(new Date());
+        abortControllerRef.current = null;
       } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          // Request was aborted, don't set error
+          return;
+        }
         setError('Unable to load bus arrival times. Please try again later.');
         console.error('Error fetching bus data:', err);
       } finally {
@@ -1039,152 +1019,38 @@ const BusTrackerContent = () => {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, POLLING_INTERVAL);
-    return () => clearInterval(interval);
+    intervalRef.current = setInterval(fetchData, POLLING_INTERVAL);
+    
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
   }, [busLineId, originId, destinationId]);
 
   useEffect(() => {
-    const timer = setInterval(() => {
+    countdownRef.current = setInterval(() => {
       if (!lastRefresh) return;
       const timeSinceLastRefresh = Date.now() - lastRefresh.getTime();
       const remainingSeconds = Math.max(0, Math.ceil((POLLING_INTERVAL - timeSinceLastRefresh) / 1000));
       setNextRefreshIn(remainingSeconds);
     }, 1000);
 
-    return () => clearInterval(timer);
+    return () => {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+      }
+    };
   }, [lastRefresh]);
 
-  const formatTime = (date: Date | null) => {
-    if (!date || isNaN(date.getTime())) return 'N/A';
-    return date.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-  };
 
-  const getMinutesUntil = (date: Date | null) => {
-    if (!date || isNaN(date.getTime())) return 'N/A';
-    const diff = date.getTime() - new Date().getTime();
-    const minutes = Math.floor(diff / 60000);
-    return minutes < 1 ? 'NOW' : minutes;
-  };
 
-  // Get stops for current direction
-  const getDirectionStops = useCallback(() => {
-    const direction = directions.find(d => d.id === selectedDirection);
-
-    // Simple sorting function that uses the API-provided sequence numbers
-    const sortStopsBySequence = (stops: BusStop[]) => {
-      return [...stops].sort((a, b) => a.sequence - b.sequence);
-    };
-
-    if (!direction) {
-      // If there are no directions at all, return all stops sorted by sequence
-      if (directions.length === 0) {
-        // First group by direction, then sort each group by sequence
-        const directionGroups: Record<string, BusStop[]> = {};
-        stops.forEach(stop => {
-          if (!directionGroups[stop.direction]) {
-            directionGroups[stop.direction] = [];
-          }
-          directionGroups[stop.direction].push(stop);
-        });
-
-        // Sort each direction group by sequence
-        const allSortedStops: BusStop[] = [];
-        Object.values(directionGroups).forEach(dirStops => {
-          allSortedStops.push(...sortStopsBySequence(dirStops));
-        });
-
-        return allSortedStops.map(stop => ({
-          value: stop.id,
-          label: stop.name
-        }));
-      }
-
-      // If we have directions but selected one is not found,
-      // use the first direction instead
-      if (directions.length > 0) {
-        const firstDirection = directions[0];
-        setSelectedDirection(firstDirection.id);
-
-        const filteredStops = stops.filter(s => s.direction === firstDirection.name);
-        const sortedStops = sortStopsBySequence(filteredStops);
-
-        return sortedStops.map(s => ({
-          value: s.id,
-          label: s.name
-        }));
-      }
-
-      return [];
-    }
-
-    const filteredStops = stops.filter(stop => stop.direction === direction.name);
-
-    if (filteredStops.length === 0) {
-      // If no stops match the exact direction name, try a more flexible approach
-      const allDirectionNames = [...new Set(stops.map(s => s.direction))];
-
-      // Try to find a direction name that contains our direction name or vice versa
-      const similarDirection = allDirectionNames.find(
-        dirName => dirName.includes(direction.name) || direction.name.includes(dirName)
-      );
-
-      if (similarDirection) {
-        const similarStops = stops.filter(s => s.direction === similarDirection);
-        const sortedStops = sortStopsBySequence(similarStops);
-
-        return sortedStops.map(s => ({
-          value: s.id,
-          label: s.name
-        }));
-      }
-
-      // If still no stops found, group by direction and sort each group
-      if (stops.length > 0) {
-        // Group by direction first
-        const directionGroups: Record<string, BusStop[]> = {};
-        stops.forEach(stop => {
-          if (!directionGroups[stop.direction]) {
-            directionGroups[stop.direction] = [];
-          }
-          directionGroups[stop.direction].push(stop);
-        });
-
-        // Sort each direction group by sequence
-        const allSortedStops: BusStop[] = [];
-        Object.values(directionGroups).forEach(dirStops => {
-          allSortedStops.push(...sortStopsBySequence(dirStops));
-        });
-
-        return allSortedStops.map(stop => ({
-          value: stop.id,
-          label: stop.name
-        }));
-      }
-    }
-
-    // Sort the filtered stops by sequence
-    const sortedStops = sortStopsBySequence(filteredStops);
-
-    return sortedStops.map(stop => ({
-      value: stop.id,
-      label: stop.name
-    }));
-  }, [directions, selectedDirection, stops]);
-
-  // Make sure we only compute currentStops once
-  const currentStops = React.useMemo(() => {
-    // If no bus line is selected, return empty array
-    if (!busLineId) {
-      return [];
-    }
-    console.log('Recomputing currentStops with direction:', selectedDirection);
-    const directionStops = getDirectionStops();
-    return directionStops.length > 0 ? directionStops : [];
-  }, [getDirectionStops, busLineId, selectedDirection, forceUpdate]);
 
   const handleGeolocation = async () => {
     setGeoLoading(true);
@@ -1215,7 +1081,8 @@ const BusTrackerContent = () => {
         throw new Error('Failed to fetch nearby bus lines');
       }
 
-      const data = await response.json();
+      const responseData = await response.json();
+      const data = responseData.success ? responseData.data : responseData;
       console.log('Got nearby bus lines:', data);
 
       if (data.busLines && data.busLines.length > 0) {
@@ -1241,6 +1108,9 @@ const BusTrackerContent = () => {
           default:
             setGeoError('Error getting location');
         }
+      } else if (err instanceof Error && err.name === 'AbortError') {
+        // Request was aborted, don't set error
+        return;
       } else {
         setGeoError('Error finding nearby bus lines');
       }
@@ -1282,7 +1152,9 @@ const BusTrackerContent = () => {
                   value={busLineSearch}
                   onChange={handleBusLineSearchChange}
                   onFocus={() => {
-                    setBusLineSearch('');
+                    if (busLineSearch && !busLineId) {
+                      setBusLineSearch('');
+                    }
                     setShowBusLineResults(false);
                   }}
                   placeholder="Start typing bus line (e.g. B52)"
@@ -1358,7 +1230,7 @@ const BusTrackerContent = () => {
                     setOriginId('');
                     setDestinationId('');
                     // Force update of stops list
-                    setForceUpdate(prev => prev + 1);
+                    triggerForceUpdate();
                   }}
                   className="text-gray-800 rounded px-2 py-1 w-full"
                 >
