@@ -7,11 +7,13 @@ const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
   variable: "--font-geist-sans",
   weight: "100 900",
+  fallback: ["system-ui", "arial", "sans-serif"],
 });
 const geistMono = localFont({
   src: "./fonts/GeistMonoVF.woff",
   variable: "--font-geist-mono",
   weight: "100 900",
+  fallback: ["ui-monospace", "monaco", "monospace"],
 });
 
 export const metadata: Metadata = {

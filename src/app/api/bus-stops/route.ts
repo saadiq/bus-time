@@ -87,7 +87,6 @@ export async function GET(request: NextRequest) {
       lineId
     )}.json?key=${apiKey}&includePolylines=false&includeReferences=true&version=2`;
 
-    // console.log("Fetching stops with URL:", url);
 
     const response = await fetch(url, {
       cache: "no-store",
@@ -111,35 +110,7 @@ export async function GET(request: NextRequest) {
 
     const data: MTAApiResponse = await response.json();
 
-    // Log the raw response data (excluding sensitive information)
-    console.log("Raw API Response:", {
-      code: data.code,
-      text: data.text,
-      hasData: !!data.data,
-      hasEntry: !!data.data?.entry,
-      entryKeys: data.data?.entry ? Object.keys(data.data.entry) : [],
-      stopGroupings: data.data?.entry?.stopGroupings?.map((grouping) => ({
-        stopGroups: grouping.stopGroups?.map((group) => ({
-          id: group.id,
-          name: group.name,
-          stopIdsCount: group.stopIds?.length || 0,
-        })),
-      })),
-    });
 
-    // Log the structure of the response (without sensitive data)
-    console.log("API Response Structure:", {
-      hasCode: !!data.code,
-      code: data.code,
-      hasText: !!data.text,
-      hasData: !!data.data,
-      hasEntry: !!data.data?.entry,
-      hasStopGroupings: !!data.data?.entry?.stopGroupings,
-      stopGroupingsLength: data.data?.entry?.stopGroupings?.length || 0,
-      hasReferences: !!data.data?.entry?.references,
-      hasStops: !!data.data?.entry?.references?.stops,
-      referencedStopsCount: data.data?.entry?.references?.stops?.length || 0,
-    });
 
     // Check for error in the API response
     if (data.code && data.code !== 200) {
@@ -169,7 +140,6 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    console.log(`Found ${Object.keys(stopsMap).length} stops in references`);
     if (Object.keys(stopsMap).length === 0) {
       console.warn(
         "No stops found in references section. Raw references:",
@@ -204,7 +174,6 @@ export async function GET(request: NextRequest) {
         });
       });
 
-      console.log(`Found ${allStopIds.size} unique stop IDs to fetch`);
 
       // Fetch stop details in parallel
       const stopPromises = Array.from(allStopIds).map(async (stopId) => {
@@ -244,9 +213,6 @@ export async function GET(request: NextRequest) {
 
       // Wait for all stop details to be fetched
       await Promise.all(stopPromises);
-      console.log(
-        `Successfully fetched ${Object.keys(stopsMap).length} stop details`
-      );
     }
 
     // Extract direction information from the stop groupings
@@ -294,9 +260,6 @@ export async function GET(request: NextRequest) {
 
           if (directionId && directionName) {
             directionsArray.push({ id: directionId, name: directionName });
-            console.log(
-              `Processing direction: ${directionName} (${directionId})`
-            );
 
             // Process stops for this direction
             if (group.stopIds) {
@@ -304,9 +267,6 @@ export async function GET(request: NextRequest) {
                 ? group.stopIds
                 : [group.stopIds];
 
-              console.log(
-                `Found ${stopIds.length} stop IDs for direction ${directionName}`
-              );
 
               stopIds.forEach((stopId) => {
                 const stopDetails = stopsMap[stopId];
@@ -338,14 +298,6 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    console.log(`Processed ${stopsArray.length} stops with directions:`, {
-      directionsCount: directionsArray.length,
-      directions: directionsArray.map((d) => d.name),
-      stopsPerDirection: directionsArray.map((d) => ({
-        direction: d.name,
-        count: stopsArray.filter((s) => s.direction === d.name).length,
-      })),
-    });
 
     // Check if we have any stops
     if (stopsArray.length === 0) {

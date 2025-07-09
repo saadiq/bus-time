@@ -221,7 +221,6 @@ const BusTrackerContent = () => {
 
   // Select a bus line from the results
   const selectBusLine = async (line: BusLine) => {
-    console.log('Selected line:', line);
     setBusLineSearch(`${line.shortName} - ${line.longName}`);
     setShowBusLineResults(false);
     setBusLineId(line.id);
@@ -1059,7 +1058,6 @@ const BusTrackerContent = () => {
     setShowBusLineResults(false);
 
     try {
-      console.log('\n=== Starting Geolocation Process ===');
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
@@ -1068,7 +1066,6 @@ const BusTrackerContent = () => {
         });
       });
 
-      console.log('Got position:', position.coords);
       const { latitude, longitude } = position.coords;
       const response = await fetch(`/api/bus-lines/nearby?lat=${latitude}&lon=${longitude}`, {
         headers: {
@@ -1083,10 +1080,8 @@ const BusTrackerContent = () => {
 
       const responseData = await response.json();
       const data = responseData.success ? responseData.data : responseData;
-      console.log('Got nearby bus lines:', data);
 
       if (data.busLines && data.busLines.length > 0) {
-        console.log('Setting bus line results:', data.busLines);
         setBusLineResults(data.busLines);
         setShowBusLineResults(true);
       } else {
@@ -1116,7 +1111,6 @@ const BusTrackerContent = () => {
       }
     } finally {
       setGeoLoading(false);
-      console.log('=== Geolocation Process Complete ===\n');
     }
   };
 

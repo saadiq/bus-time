@@ -169,7 +169,6 @@ export async function GET(request: NextRequest) {
       .slice(0, 5);
 
     if (nearbyRoutes.length === 0) {
-      console.log("No valid routes found after processing");
     }
 
     const apiResponse: ApiResponse<{ busLines: NearbyBusLine[] }> = {

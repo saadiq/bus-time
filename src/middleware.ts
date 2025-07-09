@@ -8,21 +8,24 @@ export function middleware(request: NextRequest) {
   // Security Headers
   const nonce = generateNonce();
 
-  // Content Security Policy
+  // Content Security Policy for Next.js
+  // Using 'unsafe-inline' for styles as Next.js injects inline styles
+  // Using 'unsafe-eval' for development mode compatibility
+  const isDev = process.env.NODE_ENV === 'development';
   const csp = [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-eval' 'nonce-${nonce}' https://vercel.live`,
+    `script-src 'self' ${isDev ? "'unsafe-eval'" : ""} 'nonce-${nonce}' 'strict-dynamic'`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self' https://bustime.mta.info https://vercel.live wss:",
+    "connect-src 'self' https://bustime.mta.info https://vercel.live wss: ws:",
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    "upgrade-insecure-requests"
-  ].join('; ');
+    process.env.NODE_ENV === 'production' ? "upgrade-insecure-requests" : ""
+  ].filter(Boolean).join('; ');
 
   // Set security headers
   response.headers.set('Content-Security-Policy', csp);
