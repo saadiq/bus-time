@@ -48,6 +48,7 @@ const BusTrackerContent = () => {
   const titleIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentBusLineRef = useRef({ id: '', search: '' });
+  const isSettingDirectionProgrammaticallyRef = useRef(false);
 
   // Memoized computations
   const calculateDistance = useDistanceCalculation();
@@ -55,6 +56,12 @@ const BusTrackerContent = () => {
   const getBusStatus = useBusStatus(enableCutoff, cutoffTime);
   const { formatTime, getMinutesUntil } = useTimeFormatting();
   const findMatchingStop = useStopMatching();
+  
+  // Get stop names from loaded stops data
+  const getStopName = (stopId: string) => {
+    const stop = stops.find(s => s.id === stopId);
+    return stop ? stop.name : 'Unknown Stop';
+  };
 
   // Cleanup effect for all refs when component unmounts
   useEffect(() => {
@@ -90,13 +97,16 @@ const BusTrackerContent = () => {
     // Load from URL parameters if present, otherwise from local storage
     if (urlBusLine) {
       setBusLineId(urlBusLine);
-      fetchBusLineDetails(urlBusLine);
-      fetchStopsForLine(urlBusLine,
-        urlOriginId || undefined,
-        urlDestinationId || undefined);
-
-      if (urlOriginId) setOriginId(urlOriginId);
-      if (urlDestinationId) setDestinationId(urlDestinationId);
+      
+      // Fetch bus line details and stops in sequence
+      (async () => {
+        await fetchBusLineDetails(urlBusLine);
+        await fetchStopsForLine(urlBusLine, urlOriginId || undefined, urlDestinationId || undefined);
+        // Origin and destination IDs are already set by fetchStopsForLine if the stops exist
+        
+        // Open settings panel when loading from URL so user can see the configuration
+        setIsConfigOpen(true);
+      })();
     } else {
       // Try to load from local storage
       const storedBusLine = localStorage.getItem('busLine');
@@ -167,7 +177,7 @@ const BusTrackerContent = () => {
   }, [busLineId, originId, destinationId, enableCutoff, cutoffTime, router]);
 
   // Fetch bus line details by ID
-  const fetchBusLineDetails = async (lineId: string) => {
+  const fetchBusLineDetails = async (lineId: string): Promise<void> => {
     try {
       setBusLineLoading(true);
       // Create a more descriptive fallback name from the lineId
@@ -224,6 +234,17 @@ const BusTrackerContent = () => {
     setBusLineSearch(`${line.shortName} - ${line.longName}`);
     setShowBusLineResults(false);
     setBusLineId(line.id);
+    
+    // Don't override with geolocation if URL parameters are present
+    const urlOriginId = query.get('originId');
+    const urlDestinationId = query.get('destinationId');
+    if (urlOriginId && urlDestinationId) {
+      // Just fetch stops without geolocation logic
+      await fetchStopsForLine(line.id, urlOriginId, urlDestinationId);
+      setOriginId(urlOriginId);
+      setDestinationId(urlDestinationId);
+      return;
+    }
 
     try {
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
@@ -291,6 +312,7 @@ const BusTrackerContent = () => {
         // Set directions first if available
         if (data.directions && data.directions.length > 0) {
           setDirections(data.directions);
+          isSettingDirectionProgrammaticallyRef.current = true;
           setSelectedDirection(data.directions[0].id);
         }
 
@@ -402,6 +424,7 @@ const BusTrackerContent = () => {
       // Set directions if available
       if (data.directions && data.directions.length > 0) {
         setDirections(data.directions);
+        isSettingDirectionProgrammaticallyRef.current = true;
         setSelectedDirection(data.directions[0].id);
 
         // Get stops for the current direction
@@ -463,7 +486,7 @@ const BusTrackerContent = () => {
 
 
   // Fetch stops for a selected bus line - wrapped in useCallback to prevent recreating on each render
-  const fetchStopsForLine = useCallback(async (lineId: string, preserveOriginId?: string, preserveDestinationId?: string) => {
+  const fetchStopsForLine = useCallback(async (lineId: string, preserveOriginId?: string, preserveDestinationId?: string): Promise<void> => {
     // Store current bus line info
     const currentBusLineSearch = busLineSearch;
 
@@ -530,7 +553,29 @@ const BusTrackerContent = () => {
 
         if (data.directions && data.directions.length > 0) {
           setDirections(data.directions);
-          setSelectedDirection(data.directions[0].id);
+          
+          // If we're preserving values, find the correct direction for those stops
+          let selectedDirectionId = data.directions[0].id; // default to first direction
+          
+          if (preserveOriginId && preserveDestinationId) {
+            // Find which direction the preserved stops belong to
+            const originStop = data.stops.find((s: BusStop) => s.id === preserveOriginId);
+            const destinationStop = data.stops.find((s: BusStop) => s.id === preserveDestinationId);
+            
+            if (originStop && destinationStop) {
+              // Find the direction that matches the stops' direction
+              const matchingDirection = data.directions.find((d: { id: string; name: string }) => 
+                d.name === originStop.direction || d.name === destinationStop.direction
+              );
+              if (matchingDirection) {
+                selectedDirectionId = matchingDirection.id;
+              }
+            }
+          }
+          
+          // Set direction programmatically
+          isSettingDirectionProgrammaticallyRef.current = true;
+          setSelectedDirection(selectedDirectionId);
         } else {
           console.warn('No directions found in the API response');
         }
@@ -542,15 +587,19 @@ const BusTrackerContent = () => {
           const shouldPreserveDestination = allStopIds.includes(preserveDestinationId);
 
           if (shouldPreserveOrigin && shouldPreserveDestination) {
-            setOriginId(preserveOriginId);
-            setDestinationId(preserveDestinationId);
+            batchUpdate({
+              originId: preserveOriginId,
+              destinationId: preserveDestinationId
+            });
             updateUrl({
               originId: preserveOriginId,
               destinationId: preserveDestinationId
             });
           } else {
-            setOriginId('');
-            setDestinationId('');
+            batchUpdate({
+              originId: '',
+              destinationId: ''
+            });
           }
         } else {
           setOriginId('');
@@ -586,38 +635,8 @@ const BusTrackerContent = () => {
     }
   }, [updateUrl, busLineSearch]);
 
-  // Load parameters from URL
+  // Handle cutoff settings from URL
   useEffect(() => {
-    // Store previous values to detect changes
-    const prevBusLine = busLineId;
-    const prevOriginId = originId;
-    const prevDestinationId = destinationId;
-
-    // Get parameters from URL
-    const urlBusLine = query.get('busLine');
-    const urlOriginId = query.get('originId');
-    const urlDestinationId = query.get('destinationId');
-
-    // Only update if values are different
-    if (urlBusLine && urlBusLine !== prevBusLine) {
-      setBusLineId(urlBusLine);
-      fetchBusLineDetails(urlBusLine);
-      fetchStopsForLine(urlBusLine,
-        urlOriginId || undefined,
-        urlDestinationId || undefined);
-      // Only auto-expand settings when bus line is first loaded from URL
-      setIsConfigOpen(true);
-    }
-
-    // Only update origin/destination if they've changed
-    if (urlOriginId && urlOriginId !== prevOriginId) {
-      setOriginId(urlOriginId);
-    }
-    if (urlDestinationId && urlDestinationId !== prevDestinationId) {
-      setDestinationId(urlDestinationId);
-    }
-
-    // Handle cutoff settings
     const urlCutoff = query.get('cutoff');
     const urlTime = query.get('time');
     if (urlCutoff === 'true') {
@@ -1220,11 +1239,16 @@ const BusTrackerContent = () => {
                   onChange={(e) => {
                     const newDirection = e.target.value;
                     setSelectedDirection(newDirection);
-                    // Clear current selections as they might not exist in new direction
-                    setOriginId('');
-                    setDestinationId('');
-                    // Force update of stops list
-                    triggerForceUpdate();
+                    // Only clear selections if this is a user-initiated change
+                    if (!isSettingDirectionProgrammaticallyRef.current) {
+                      // Clear current selections as they might not exist in new direction
+                      setOriginId('');
+                      setDestinationId('');
+                      // Force update of stops list
+                      triggerForceUpdate();
+                    }
+                    // Reset the flag after handling the change
+                    isSettingDirectionProgrammaticallyRef.current = false;
                   }}
                   className="text-gray-800 rounded px-2 py-1 w-full"
                 >
@@ -1291,7 +1315,17 @@ const BusTrackerContent = () => {
         )}
 
         <div className="text-sm mt-3">
-          📍 {data?.originName} → {data?.destinationName}
+          📍 {
+            data?.originName || 
+            (originId && stops.length > 0 ? getStopName(originId) : 
+             stopsLoading ? 'Loading origin...' : 
+             originId ? `Stop ${originId}` : 'Unknown Origin')
+          } → {
+            data?.destinationName || 
+            (destinationId && stops.length > 0 ? getStopName(destinationId) : 
+             stopsLoading ? 'Loading destination...' : 
+             destinationId ? `Stop ${destinationId}` : 'Unknown Destination')
+          }
         </div>
         <div className="mt-4 flex items-center gap-4">
           <div className="flex items-center gap-2">
