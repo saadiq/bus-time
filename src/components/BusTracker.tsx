@@ -60,7 +60,7 @@ const BusTrackerContent = () => {
   // Get stop names from loaded stops data
   const getStopName = (stopId: string) => {
     const stop = stops.find(s => s.id === stopId);
-    return stop ? stop.name : 'Unknown Stop';
+    return stop ? stop.name : null;
   };
 
   // Cleanup effect for all refs when component unmounts
@@ -949,7 +949,11 @@ const BusTrackerContent = () => {
       // Don't fetch if we don't have all necessary values
       if (!busLineId || !originId || !destinationId) {
         setArrivals([]);
-        setData(null);
+        // Don't clear data immediately - preserve it for display
+        // Only clear if we're actually missing required IDs, not during transitions
+        if (!busLineId && !originId && !destinationId) {
+          setData(null);
+        }
         return;
       }
 
@@ -1317,14 +1321,14 @@ const BusTrackerContent = () => {
         <div className="text-sm mt-3">
           📍 {
             data?.originName || 
-            (originId && stops.length > 0 ? getStopName(originId) : 
-             stopsLoading ? 'Loading origin...' : 
-             originId ? `Stop ${originId}` : 'Unknown Origin')
+            getStopName(originId) ||
+            (stopsLoading && originId ? 'Loading origin...' : 
+             originId ? originId : 'Select Origin')
           } → {
             data?.destinationName || 
-            (destinationId && stops.length > 0 ? getStopName(destinationId) : 
-             stopsLoading ? 'Loading destination...' : 
-             destinationId ? `Stop ${destinationId}` : 'Unknown Destination')
+            getStopName(destinationId) ||
+            (stopsLoading && destinationId ? 'Loading destination...' : 
+             destinationId ? destinationId : 'Select Destination')
           }
         </div>
         <div className="mt-4 flex items-center gap-4">

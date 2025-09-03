@@ -215,7 +215,9 @@ export async function GET(request: NextRequest) {
     }
 
     const originData = await originResponse.json();
-    const originName = originData.name || "Unknown Origin";
+    // Handle API response structure - check if it's wrapped in success/data
+    const originStopData = originData.success ? originData.data : originData;
+    const originName = originStopData?.entry?.name || originStopData?.name || "Unknown Origin";
 
     // Fetch destination stop info
     const destinationResponse = await fetch(
@@ -235,7 +237,9 @@ export async function GET(request: NextRequest) {
     }
 
     const destinationData = await destinationResponse.json();
-    const destinationName = destinationData.name || "Unknown Destination";
+    // Handle API response structure - check if it's wrapped in success/data
+    const destinationStopData = destinationData.success ? destinationData.data : destinationData;
+    const destinationName = destinationStopData?.entry?.name || destinationStopData?.name || "Unknown Destination";
 
     // Only use real-time data
     try {
