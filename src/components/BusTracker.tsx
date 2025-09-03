@@ -48,7 +48,6 @@ const BusTrackerContent = () => {
   const titleIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentBusLineRef = useRef({ id: '', search: '' });
-  const isSettingDirectionProgrammaticallyRef = useRef(false);
 
   // Memoized computations
   const calculateDistance = useDistanceCalculation();
@@ -61,6 +60,16 @@ const BusTrackerContent = () => {
   const getStopName = (stopId: string) => {
     const stop = stops.find(s => s.id === stopId);
     return stop ? stop.name : null;
+  };
+
+  // Extract route name without direction details
+  const extractRouteName = (longName: string): string => {
+    // Remove direction info like "X to Y" or "via Z"
+    const cleanName = longName
+      .replace(/\s+(to|TO)\s+.*$/i, '')
+      .replace(/\s+(via|VIA)\s+.*$/i, '')
+      .trim();
+    return cleanName || longName;
   };
 
   // Cleanup effect for all refs when component unmounts
@@ -203,7 +212,7 @@ const BusTrackerContent = () => {
       const data = responseData.success ? responseData.data : responseData;
 
       if (data.busLine) {
-        setBusLineSearch(`${data.busLine.shortName} - ${data.busLine.longName}`);
+        setBusLineSearch(`${data.busLine.shortName} - ${extractRouteName(data.busLine.longName)}`);
       } else {
         console.warn('Bus line info API returned no data:', data);
         setBusLineSearch(`Bus ${fallbackName}`);
@@ -231,7 +240,7 @@ const BusTrackerContent = () => {
 
   // Select a bus line from the results
   const selectBusLine = async (line: BusLine) => {
-    setBusLineSearch(`${line.shortName} - ${line.longName}`);
+    setBusLineSearch(`${line.shortName} - ${extractRouteName(line.longName)}`);
     setShowBusLineResults(false);
     setBusLineId(line.id);
     
@@ -312,7 +321,6 @@ const BusTrackerContent = () => {
         // Set directions first if available
         if (data.directions && data.directions.length > 0) {
           setDirections(data.directions);
-          isSettingDirectionProgrammaticallyRef.current = true;
           setSelectedDirection(data.directions[0].id);
         }
 
@@ -424,7 +432,6 @@ const BusTrackerContent = () => {
       // Set directions if available
       if (data.directions && data.directions.length > 0) {
         setDirections(data.directions);
-        isSettingDirectionProgrammaticallyRef.current = true;
         setSelectedDirection(data.directions[0].id);
 
         // Get stops for the current direction
@@ -573,11 +580,13 @@ const BusTrackerContent = () => {
             }
           }
           
-          // Set direction programmatically
-          isSettingDirectionProgrammaticallyRef.current = true;
+          // Always set a direction to ensure stops are properly filtered
           setSelectedDirection(selectedDirectionId);
         } else {
           console.warn('No directions found in the API response');
+          // If no directions, clear the selection
+          setDirections([]);
+          setSelectedDirection('');
         }
 
         // Only set default origin/destination if we're preserving values
@@ -725,11 +734,7 @@ const BusTrackerContent = () => {
 
   // Swap direction function
   const handleSwapDirections = () => {
-    // Store current values
-    const tempOrigin = originId;
-    const tempDestination = destinationId;
-
-    // First, update the direction if we have multiple directions
+    // If we have multiple directions, switch to the opposite one
     if (directions.length > 1) {
       const currentDirIndex = directions.findIndex(d => d.id === selectedDirection);
       if (currentDirIndex !== -1) {
@@ -737,55 +742,25 @@ const BusTrackerContent = () => {
         const newDirIndex = (currentDirIndex + 1) % directions.length;
         const newDirection = directions[newDirIndex];
 
-        // Find the current stops
-        const currentOriginStop = stops.find(s => s.id === tempOrigin);
-        const currentDestStop = stops.find(s => s.id === tempDestination);
+        // Update direction and clear stops (user will re-select)
+        batchUpdate({
+          selectedDirection: newDirection.id,
+          originId: '',
+          destinationId: '',
+          forceUpdate: forceUpdate + 1
+        });
 
-        // Get stops for the new direction
-        const newDirectionStops = stops.filter(s => s.direction === newDirection.name);
-
-        if (newDirectionStops.length === 0) {
-          console.warn('No stops found for new direction:', newDirection.name);
-          return;
-        }
-
-        // Function to find closest stop in new direction
-        const findClosestStop = (lat: number, lon: number) => {
-          let closestStop = newDirectionStops[0];
-          let minDistance = calculateDistance(lat, lon, closestStop.lat, closestStop.lon);
-
-          for (const stop of newDirectionStops) {
-            const distance = calculateDistance(lat, lon, stop.lat, stop.lon);
-            if (distance < minDistance) {
-              minDistance = distance;
-              closestStop = stop;
-            }
-          }
-          return closestStop;
-        };
-
-        // Find closest stops in new direction
-        if (currentOriginStop && currentDestStop) {
-          const closestToOrigin = findClosestStop(currentDestStop.lat, currentDestStop.lon);
-          const closestToDest = findClosestStop(currentOriginStop.lat, currentOriginStop.lon);
-
-          // Batch update all related state
-          batchUpdate({
-            selectedDirection: newDirection.id,
-            originId: closestToOrigin.id,
-            destinationId: closestToDest.id,
-            forceUpdate: forceUpdate + 1
-          });
-
-          // Update URL with new values
-          updateUrl({
-            originId: closestToOrigin.id,
-            destinationId: closestToDest.id
-          });
-        }
+        // Clear URL parameters for stops
+        updateUrl({
+          originId: '',
+          destinationId: ''
+        });
       }
     } else {
-      // If there's only one direction, just swap the stops
+      // If there's only one direction, just swap the origin and destination
+      const tempOrigin = originId;
+      const tempDestination = destinationId;
+      
       batchUpdate({
         originId: tempDestination,
         destinationId: tempOrigin,
@@ -1236,25 +1211,22 @@ const BusTrackerContent = () => {
             )}
 
             {busLineId && directions.length > 0 && (
-              <div className="mb-3">
-                <label className="text-sm mb-1 block">Direction</label>
+              <div className="mb-3 p-3 bg-blue-700 rounded">
+                <label className="text-sm mb-2 block font-semibold">
+                  ⚠️ Select Direction (Required)
+                </label>
                 <select
                   value={selectedDirection}
                   onChange={(e) => {
                     const newDirection = e.target.value;
                     setSelectedDirection(newDirection);
-                    // Only clear selections if this is a user-initiated change
-                    if (!isSettingDirectionProgrammaticallyRef.current) {
-                      // Clear current selections as they might not exist in new direction
-                      setOriginId('');
-                      setDestinationId('');
-                      // Force update of stops list
-                      triggerForceUpdate();
-                    }
-                    // Reset the flag after handling the change
-                    isSettingDirectionProgrammaticallyRef.current = false;
+                    // Clear current selections as they might not exist in new direction
+                    setOriginId('');
+                    setDestinationId('');
+                    // Force update of stops list
+                    triggerForceUpdate();
                   }}
-                  className="text-gray-800 rounded px-2 py-1 w-full"
+                  className="text-gray-800 rounded px-3 py-2 w-full font-medium"
                 >
                   {directions.map((direction, index) => (
                     <option key={`dir-${direction.id}-${index}`} value={direction.id}>
@@ -1262,19 +1234,26 @@ const BusTrackerContent = () => {
                     </option>
                   ))}
                 </select>
+                <p className="text-xs mt-1 text-blue-200">
+                  {currentStops.length} stops available for this direction
+                </p>
               </div>
             )}
 
             <div className="flex space-x-2">
               <div className="flex-1">
-                <label className="text-sm mb-1 block">Origin</label>
+                <label className="text-sm mb-1 block">Origin Stop</label>
                 <select
                   value={originId}
                   onChange={(e) => handleOriginChange(e.target.value)}
                   className="text-gray-800 rounded px-2 py-1 w-full"
-                  disabled={!busLineId}
+                  disabled={!busLineId || !selectedDirection || currentStops.length === 0}
                 >
-                  <option key="placeholder-origin" value="">Select origin</option>
+                  <option key="placeholder-origin" value="">
+                    {!selectedDirection ? "Select direction first" : 
+                     currentStops.length === 0 ? "No stops available" : 
+                     "Select origin stop"}
+                  </option>
                   {currentStops.map((stop, index) => (
                     <option key={`origin-${stop.id}-${index}`} value={stop.id}>{stop.name}</option>
                   ))}
@@ -1286,22 +1265,26 @@ const BusTrackerContent = () => {
                   onClick={handleSwapDirections}
                   className="bg-blue-700 rounded-full p-2 hover:bg-blue-800"
                   aria-label="Switch direction"
-                  title="Swap origin and destination"
-                  disabled={!busLineId}
+                  title={directions.length > 1 ? "Switch to opposite direction" : "Swap origin and destination"}
+                  disabled={!busLineId || !selectedDirection}
                 >
                   ↔️
                 </button>
               </div>
 
               <div className="flex-1">
-                <label className="text-sm mb-1 block">Destination</label>
+                <label className="text-sm mb-1 block">Destination Stop</label>
                 <select
                   value={destinationId}
                   onChange={(e) => handleDestinationChange(e.target.value)}
                   className="text-gray-800 rounded px-2 py-1 w-full"
-                  disabled={!busLineId}
+                  disabled={!busLineId || !selectedDirection || currentStops.length === 0}
                 >
-                  <option key="placeholder-destination" value="">Select destination</option>
+                  <option key="placeholder-destination" value="">
+                    {!selectedDirection ? "Select direction first" : 
+                     currentStops.length === 0 ? "No stops available" : 
+                     "Select destination stop"}
+                  </option>
                   {currentStops.map((stop, index) => (
                     <option key={`dest-${stop.id}-${index}`} value={stop.id}>{stop.name}</option>
                   ))}
