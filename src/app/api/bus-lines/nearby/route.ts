@@ -3,20 +3,6 @@ import { NextRequest } from "next/server";
 import { validateCoordinates, ValidationError, isRateLimited, getClientId } from '@/lib/validation';
 import { NearbyBusLine, ApiResponse } from '@/types';
 
-interface MTAStop {
-  id: string;
-  lat: number;
-  lon: number;
-  name: string;
-  routes: Array<{
-    id: string;
-    shortName: string;
-    longName: string;
-    description: string;
-    agencyId: string;
-  }>;
-}
-
 interface MTARoute {
   id: string;
   shortName: string;

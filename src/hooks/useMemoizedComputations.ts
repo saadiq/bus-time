@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react';
-import { BusStop, Direction, BusArrival } from '@/types';
+import { BusStop, Direction } from '@/types';
 
 // Memoized Haversine distance calculation
 export const useDistanceCalculation = () => {

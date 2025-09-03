@@ -524,14 +524,6 @@ export async function GET(request: NextRequest) {
         timestamp: new Date().toISOString()
       });
       
-      const errorData: BusData = {
-        originName: 'Unknown',
-        destinationName: 'Unknown',
-        buses: [],
-        hasError: true,
-        errorMessage: "Failed to fetch bus times"
-      };
-      
       const errorResponse: ApiResponse<BusData> = {
         success: false,
         error: "Failed to fetch bus times"

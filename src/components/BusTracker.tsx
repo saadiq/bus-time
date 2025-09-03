@@ -9,8 +9,7 @@ import {
   useDistanceCalculation, 
   useDirectionStops, 
   useBusStatus, 
-  useTimeFormatting,
-  useStopMatching 
+  useTimeFormatting
 } from '@/hooks/useMemoizedComputations';
 
 
@@ -54,7 +53,6 @@ const BusTrackerContent = () => {
   const currentStops = useDirectionStops(stops, directions, selectedDirection);
   const getBusStatus = useBusStatus(enableCutoff, cutoffTime);
   const { formatTime, getMinutesUntil } = useTimeFormatting();
-  const findMatchingStop = useStopMatching();
   
   // Get stop names from loaded stops data
   const getStopName = (stopId: string) => {
@@ -326,7 +324,6 @@ const BusTrackerContent = () => {
 
         // Find the stop that matches the closest stop name
         let matchingStop = null;
-        let matchReason = '';
         let matchFound = false;
 
         const targetStreets = normalizeIntoStreets(nearbyLine.closestStop.name);
@@ -362,7 +359,6 @@ const BusTrackerContent = () => {
 
           if (streetsMatch) {
             matchingStop = stop;
-            matchReason = 'exact street match';
             matchFound = true;
             break;
           }
@@ -391,7 +387,6 @@ const BusTrackerContent = () => {
             }
           }
           matchingStop = closestStop;
-          matchReason = 'closest by distance';
         }
 
         if (matchingStop) {

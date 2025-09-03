@@ -43,9 +43,6 @@ interface MTAApiResponse {
   };
 }
 
-// Store fetched individual stops in this variable during request processing
-// This is not a persistent cache, just a temporary lookup map during a single request
-const individualStopsFetched: Record<string, StopReference> = {};
 
 export async function GET(request: NextRequest) {
   try {
@@ -135,30 +132,20 @@ export async function GET(request: NextRequest) {
       );
     }
     
-    // Log the structure to understand what we're getting
-    console.log("API Response structure:", {
-      hasReferences: !!entry.references,
-      hasStopGroupings: !!entry.stopGroupings,
-      stopGroupingsLength: entry.stopGroupings?.length || 0,
-      referencesKeys: entry.references ? Object.keys(entry.references) : [],
-    });
 
     // First, build a map of all stops from the references section
     const stopsMap: Record<string, StopReference> = {};
     
     // Check if stops are in the references section
     if (entry.references?.stops && Array.isArray(entry.references.stops)) {
-      console.log(`Found ${entry.references.stops.length} stops in references`);
       entry.references.stops.forEach((stop) => {
         if (stop.id) {
           stopsMap[stop.id] = stop;
         }
       });
     } else {
-      console.log("No stops array in references, checking data.references");
       // Sometimes the API returns stops in data.references
       if (data.data?.references?.stops && Array.isArray(data.data.references.stops)) {
-        console.log(`Found ${data.data.references.stops.length} stops in data.references`);
         data.data.references.stops.forEach((stop: StopReference) => {
           if (stop.id) {
             stopsMap[stop.id] = stop;
@@ -200,8 +187,6 @@ export async function GET(request: NextRequest) {
         });
       });
 
-
-      console.log(`Fetching ${allStopIds.size} individual stops...`);
       
       // Fetch stop details in parallel (limit concurrent requests)
       const stopPromises = Array.from(allStopIds).map(async (stopId) => {
@@ -242,9 +227,7 @@ export async function GET(request: NextRequest) {
       });
 
       // Wait for all stop details to be fetched
-      const results = await Promise.all(stopPromises);
-      const successCount = results.filter(r => r !== null).length;
-      console.log(`Successfully fetched ${successCount}/${allStopIds.size} stops`);
+      await Promise.all(stopPromises);
     }
 
     // Extract direction information from the stop groupings
@@ -266,12 +249,10 @@ export async function GET(request: NextRequest) {
     const stopsArray: BusStop[] = [];
     let sequence = 1;
 
-    console.log(`Processing stopGroupings, stopsMap has ${Object.keys(stopsMap).length} stops`);
 
     // Process each stop grouping
     for (const grouping of stopGroupings) {
       if (grouping.stopGroups) {
-        console.log(`Processing ${grouping.stopGroups.length} stop groups`);
         for (const group of grouping.stopGroups) {
           // Extract direction information
           let directionId = "";
@@ -302,7 +283,6 @@ export async function GET(request: NextRequest) {
                 ? group.stopIds
                 : [group.stopIds];
 
-              console.log(`Direction ${directionName}: Processing ${stopIds.length} stopIds`);
 
               stopIds.forEach((stopId) => {
                 const stopDetails = stopsMap[stopId];
@@ -336,7 +316,6 @@ export async function GET(request: NextRequest) {
 
 
     // Check if we have any stops
-    console.log(`Final results: ${directionsArray.length} directions, ${stopsArray.length} stops`);
     
     if (stopsArray.length === 0) {
       console.warn("No stops found after processing. Debug info:", {
