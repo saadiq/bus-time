@@ -732,6 +732,23 @@ const BusTrackerContent = () => {
     };
   }, []);
 
+  // Helper function to find closest stop in a list
+  const findClosestStopInList = (lat: number, lon: number, stopList: BusStop[]): BusStop | null => {
+    if (!stopList || stopList.length === 0) return null;
+    
+    let closestStop = stopList[0];
+    let minDistance = calculateDistance(lat, lon, closestStop.lat, closestStop.lon);
+    
+    for (const stop of stopList) {
+      const distance = calculateDistance(lat, lon, stop.lat, stop.lon);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestStop = stop;
+      }
+    }
+    return closestStop;
+  };
+
   // Swap direction function
   const handleSwapDirections = () => {
     // If we have multiple directions, switch to the opposite one
@@ -742,18 +759,62 @@ const BusTrackerContent = () => {
         const newDirIndex = (currentDirIndex + 1) % directions.length;
         const newDirection = directions[newDirIndex];
 
-        // Update direction and clear stops (user will re-select)
+        // Get current stops if they exist
+        const currentOriginStop = originId ? stops.find(s => s.id === originId) : null;
+        const currentDestStop = destinationId ? stops.find(s => s.id === destinationId) : null;
+
+        // Get stops for the new direction
+        const newDirectionStops = stops.filter(s => s.direction === newDirection.name);
+
+        let newOriginId = '';
+        let newDestinationId = '';
+
+        // If we have both current stops, find closest matches in opposite direction
+        if (currentOriginStop && currentDestStop && newDirectionStops.length > 0) {
+          // For return trip: destination becomes origin, origin becomes destination
+          const newOrigin = findClosestStopInList(
+            currentDestStop.lat, 
+            currentDestStop.lon, 
+            newDirectionStops
+          );
+          const newDest = findClosestStopInList(
+            currentOriginStop.lat, 
+            currentOriginStop.lon, 
+            newDirectionStops
+          );
+
+          if (newOrigin) newOriginId = newOrigin.id;
+          if (newDest) newDestinationId = newDest.id;
+        } else if (currentOriginStop && newDirectionStops.length > 0) {
+          // Only origin selected - find closest in opposite direction
+          const newDest = findClosestStopInList(
+            currentOriginStop.lat,
+            currentOriginStop.lon,
+            newDirectionStops
+          );
+          if (newDest) newDestinationId = newDest.id;
+        } else if (currentDestStop && newDirectionStops.length > 0) {
+          // Only destination selected - find closest in opposite direction
+          const newOrigin = findClosestStopInList(
+            currentDestStop.lat,
+            currentDestStop.lon,
+            newDirectionStops
+          );
+          if (newOrigin) newOriginId = newOrigin.id;
+        }
+
+        // Update state with new direction and stops
         batchUpdate({
           selectedDirection: newDirection.id,
-          originId: '',
-          destinationId: '',
+          originId: newOriginId,
+          destinationId: newDestinationId,
           forceUpdate: forceUpdate + 1
         });
 
-        // Clear URL parameters for stops
+        // Update URL parameters
         updateUrl({
-          originId: '',
-          destinationId: ''
+          originId: newOriginId || '',
+          destinationId: newDestinationId || ''
         });
       }
     } else {
