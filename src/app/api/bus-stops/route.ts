@@ -37,6 +37,9 @@ interface MTAApiResponse {
         stops?: StopReference[];
       };
     };
+    references?: {
+      stops?: StopReference[];
+    };
   };
 }
 
