@@ -89,10 +89,7 @@ export const useDirectionStops = (
           allSortedStops.push(...sortStopsBySequence(dirStops));
         });
 
-        return allSortedStops.map(stop => ({
-          value: stop.id,
-          label: stop.name
-        }));
+        return allSortedStops;
       }
 
       // If we have directions but selected one is not found,
@@ -102,10 +99,7 @@ export const useDirectionStops = (
         const filteredStops = stops.filter(s => s.direction === firstDirection.name);
         const sortedStops = sortStopsBySequence(filteredStops);
 
-        return sortedStops.map(s => ({
-          value: s.id,
-          label: s.name
-        }));
+        return sortedStops;
       }
 
       return [];
@@ -126,10 +120,7 @@ export const useDirectionStops = (
         const similarStops = stops.filter(s => s.direction === similarDirection);
         const sortedStops = sortStopsBySequence(similarStops);
 
-        return sortedStops.map(s => ({
-          value: s.id,
-          label: s.name
-        }));
+        return sortedStops;
       }
 
       // If still no stops found, group by direction and sort each group
@@ -149,20 +140,14 @@ export const useDirectionStops = (
           allSortedStops.push(...sortStopsBySequence(dirStops));
         });
 
-        return allSortedStops.map(stop => ({
-          value: stop.id,
-          label: stop.name
-        }));
+        return allSortedStops;
       }
     }
 
     // Sort the filtered stops by sequence
     const sortedStops = sortStopsBySequence(filteredStops);
 
-    return sortedStops.map(stop => ({
-      value: stop.id,
-      label: stop.name
-    }));
+    return sortedStops;
   }, [stops, directions, selectedDirection]);
 };
 

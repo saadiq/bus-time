@@ -1252,8 +1252,8 @@ const BusTrackerContent = () => {
                   }}
                   className="text-gray-800 rounded px-2 py-1 w-full"
                 >
-                  {directions.map((direction) => (
-                    <option key={direction.id} value={direction.id}>
+                  {directions.map((direction, index) => (
+                    <option key={`dir-${direction.id}-${index}`} value={direction.id}>
                       {direction.name}
                     </option>
                   ))}
@@ -1270,9 +1270,9 @@ const BusTrackerContent = () => {
                   className="text-gray-800 rounded px-2 py-1 w-full"
                   disabled={!busLineId}
                 >
-                  <option value="">Select origin</option>
-                  {currentStops.map((stop) => (
-                    <option key={stop.value} value={stop.value}>{stop.label}</option>
+                  <option key="placeholder-origin" value="">Select origin</option>
+                  {currentStops.map((stop, index) => (
+                    <option key={`origin-${stop.id}-${index}`} value={stop.id}>{stop.name}</option>
                   ))}
                 </select>
               </div>
@@ -1297,9 +1297,9 @@ const BusTrackerContent = () => {
                   className="text-gray-800 rounded px-2 py-1 w-full"
                   disabled={!busLineId}
                 >
-                  <option value="">Select destination</option>
-                  {currentStops.map((stop) => (
-                    <option key={stop.value} value={stop.value}>{stop.label}</option>
+                  <option key="placeholder-destination" value="">Select destination</option>
+                  {currentStops.map((stop, index) => (
+                    <option key={`dest-${stop.id}-${index}`} value={stop.id}>{stop.name}</option>
                   ))}
                 </select>
               </div>

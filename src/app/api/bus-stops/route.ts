@@ -110,8 +110,6 @@ export async function GET(request: NextRequest) {
 
     const data: MTAApiResponse = await response.json();
 
-
-
     // Check for error in the API response
     if (data.code && data.code !== 200) {
       console.error("API Error:", data.text);
@@ -124,26 +122,51 @@ export async function GET(request: NextRequest) {
     // Extract stops data
     const entry = data.data?.entry;
     if (!entry) {
+      console.error("Missing entry in API response. Data structure:", {
+        hasData: !!data.data,
+        dataKeys: data.data ? Object.keys(data.data) : [],
+      });
       return NextResponse.json(
         { error: "Missing entry in API response" },
         { status: 500 }
       );
     }
+    
+    // Log the structure to understand what we're getting
+    console.log("API Response structure:", {
+      hasReferences: !!entry.references,
+      hasStopGroupings: !!entry.stopGroupings,
+      stopGroupingsLength: entry.stopGroupings?.length || 0,
+      referencesKeys: entry.references ? Object.keys(entry.references) : [],
+    });
 
     // First, build a map of all stops from the references section
     const stopsMap: Record<string, StopReference> = {};
-    if (entry.references?.stops) {
+    
+    // Check if stops are in the references section
+    if (entry.references?.stops && Array.isArray(entry.references.stops)) {
+      console.log(`Found ${entry.references.stops.length} stops in references`);
       entry.references.stops.forEach((stop) => {
         if (stop.id) {
           stopsMap[stop.id] = stop;
         }
       });
+    } else {
+      console.log("No stops array in references, checking data.references");
+      // Sometimes the API returns stops in data.references
+      if (data.data?.references?.stops && Array.isArray(data.data.references.stops)) {
+        console.log(`Found ${data.data.references.stops.length} stops in data.references`);
+        data.data.references.stops.forEach((stop: StopReference) => {
+          if (stop.id) {
+            stopsMap[stop.id] = stop;
+          }
+        });
+      }
     }
 
     if (Object.keys(stopsMap).length === 0) {
       console.warn(
-        "No stops found in references section. Raw references:",
-        entry.references
+        "No stops found in references section. Will fetch individually."
       );
 
       // Extract direction information from the stop groupings
@@ -175,7 +198,9 @@ export async function GET(request: NextRequest) {
       });
 
 
-      // Fetch stop details in parallel
+      console.log(`Fetching ${allStopIds.size} individual stops...`);
+      
+      // Fetch stop details in parallel (limit concurrent requests)
       const stopPromises = Array.from(allStopIds).map(async (stopId) => {
         try {
           const stopUrl = `https://bustime.mta.info/api/where/stop/${encodeURIComponent(
@@ -204,6 +229,8 @@ export async function GET(request: NextRequest) {
               lon: stop.lon || 0,
             };
             return stop;
+          } else {
+            console.warn(`Invalid data for stop ${stopId}:`, stopData.code);
           }
         } catch (err) {
           console.warn(`Error fetching stop ${stopId}:`, err);
@@ -212,7 +239,9 @@ export async function GET(request: NextRequest) {
       });
 
       // Wait for all stop details to be fetched
-      await Promise.all(stopPromises);
+      const results = await Promise.all(stopPromises);
+      const successCount = results.filter(r => r !== null).length;
+      console.log(`Successfully fetched ${successCount}/${allStopIds.size} stops`);
     }
 
     // Extract direction information from the stop groupings
@@ -234,9 +263,12 @@ export async function GET(request: NextRequest) {
     const stopsArray: BusStop[] = [];
     let sequence = 1;
 
+    console.log(`Processing stopGroupings, stopsMap has ${Object.keys(stopsMap).length} stops`);
+
     // Process each stop grouping
     for (const grouping of stopGroupings) {
       if (grouping.stopGroups) {
+        console.log(`Processing ${grouping.stopGroups.length} stop groups`);
         for (const group of grouping.stopGroups) {
           // Extract direction information
           let directionId = "";
@@ -267,6 +299,7 @@ export async function GET(request: NextRequest) {
                 ? group.stopIds
                 : [group.stopIds];
 
+              console.log(`Direction ${directionName}: Processing ${stopIds.length} stopIds`);
 
               stopIds.forEach((stopId) => {
                 const stopDetails = stopsMap[stopId];
@@ -282,7 +315,7 @@ export async function GET(request: NextRequest) {
                   });
                 } else {
                   console.warn(
-                    `Stop ${stopId} not found in stopsMap for direction ${directionName}`
+                    `Stop ${stopId} not found in stopsMap for direction ${directionName}, skipping`
                   );
                 }
               });
@@ -300,6 +333,8 @@ export async function GET(request: NextRequest) {
 
 
     // Check if we have any stops
+    console.log(`Final results: ${directionsArray.length} directions, ${stopsArray.length} stops`);
+    
     if (stopsArray.length === 0) {
       console.warn("No stops found after processing. Debug info:", {
         stopsMapSize: Object.keys(stopsMap).length,

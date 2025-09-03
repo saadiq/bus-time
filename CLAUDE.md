@@ -69,6 +69,7 @@ MTA_API_KEY=your_api_key_here
 3. Handle MTA API inconsistencies (missing data, format variations)
 4. Preserve existing error handling patterns with user-friendly messages
 5. Test on mobile devices - UI must be responsive
+6. **NEVER fake data**: No canned data, no placeholder data, no fallback data. Always show real API responses or proper error messages. Never obfuscate failures with fake data.
 
 ## Deployment
 

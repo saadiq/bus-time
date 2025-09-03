@@ -87,7 +87,7 @@ export const initialState: BusTrackerState = {
   busLineLoading: false,
   stopsLoading: false,
   geoLoading: false,
-  isConfigOpen: false,
+  isConfigOpen: true, // Start with config open by default
   showBusLineResults: false,
   error: null,
   busStopError: null,

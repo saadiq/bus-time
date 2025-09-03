@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
 
     // Input validation
     const searchParams = request.nextUrl.searchParams;
-    const rawLineId = searchParams.get("lineId");
+    const rawLineId = searchParams.get("busLineId") || searchParams.get("lineId"); // Support both parameter names
 
     let lineId: string;
     try {
