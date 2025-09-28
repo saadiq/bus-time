@@ -44,8 +44,9 @@ const BusTrackerContent = () => {
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
-  const titleIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const stopsAbortControllerRef = useRef<AbortController | null>(null);
+  const arrivalsAbortControllerRef = useRef<AbortController | null>(null);
+  const searchAbortControllerRef = useRef<AbortController | null>(null);
   const currentBusLineRef = useRef({ id: '', search: '' });
 
   // Memoized computations
@@ -83,103 +84,125 @@ const BusTrackerContent = () => {
       if (countdownRef.current) {
         clearInterval(countdownRef.current);
       }
-      if (titleIntervalRef.current) {
-        clearInterval(titleIntervalRef.current);
+      if (stopsAbortControllerRef.current) {
+        stopsAbortControllerRef.current.abort();
       }
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
+      if (arrivalsAbortControllerRef.current) {
+        arrivalsAbortControllerRef.current.abort();
+      }
+      if (searchAbortControllerRef.current) {
+        searchAbortControllerRef.current.abort();
       }
     };
   }, []);
 
-  // Load initial data
+  // Load initial data using precedence: URL > localStorage > empty state
   useEffect(() => {
     setLastRefresh(new Date());
 
-    // Check URL parameters first
-    const urlBusLine = query.get('busLine');
-    const urlOriginId = query.get('originId');
-    const urlDestinationId = query.get('destinationId');
+    const bootstrap = async () => {
+      try {
+        const urlBusLine = query.get('busLine');
+        const urlOriginId = query.get('originId');
+        const urlDestinationId = query.get('destinationId');
 
-    // Load from URL parameters if present, otherwise from local storage
-    if (urlBusLine) {
-      setBusLineId(urlBusLine);
-      
-      // Fetch bus line details and stops in sequence
-      (async () => {
-        await fetchBusLineDetails(urlBusLine);
-        await fetchStopsForLine(urlBusLine, urlOriginId || undefined, urlDestinationId || undefined);
-        // Origin and destination IDs are already set by fetchStopsForLine if the stops exist
-        
-        // Open settings panel when loading from URL so user can see the configuration
-        setIsConfigOpen(true);
-      })();
-    } else {
-      // Try to load from local storage
-      const storedBusLine = localStorage.getItem('busLine');
-      const storedOriginId = localStorage.getItem('originId');
-      const storedDestinationId = localStorage.getItem('destinationId');
-      const storedBusLineSearch = localStorage.getItem('busLineSearch');
+        if (urlBusLine) {
+          setBusLineId(urlBusLine);
+          await fetchBusLineDetails(urlBusLine);
+          await fetchStopsForLine(urlBusLine, urlOriginId || undefined, urlDestinationId || undefined);
+          setIsConfigOpen(true);
+          return;
+        }
 
-      if (storedBusLine && storedOriginId && storedDestinationId) {
-        setBusLineId(storedBusLine);
-        setBusLineSearch(storedBusLineSearch || storedBusLine);
-        setOriginId(storedOriginId);
-        setDestinationId(storedDestinationId);
-        fetchStopsForLine(storedBusLine, storedOriginId, storedDestinationId);
-      } else {
-        // If no stored preferences, show the settings panel with empty state
+        const storedBusLine = localStorage.getItem('busLine');
+        const storedOriginId = localStorage.getItem('originId');
+        const storedDestinationId = localStorage.getItem('destinationId');
+        const storedBusLineSearch = localStorage.getItem('busLineSearch');
+
+        if (storedBusLine && storedOriginId && storedDestinationId) {
+          setBusLineId(storedBusLine);
+          setBusLineSearch(storedBusLineSearch || storedBusLine);
+          await fetchStopsForLine(storedBusLine, storedOriginId, storedDestinationId);
+          syncUrl({
+            busLineId: storedBusLine,
+            originId: storedOriginId,
+            destinationId: storedDestinationId,
+          });
+          return;
+        }
+
         setIsConfigOpen(true);
         setBusLineId('');
         setBusLineSearch('');
         setOriginId('');
         setDestinationId('');
         setStops([]);
+      } catch (err) {
+        console.error('Failed to bootstrap tracker state:', err);
+        setIsConfigOpen(true);
       }
-    }
+    };
+
+    bootstrap();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Save selections to local storage whenever they change
   useEffect(() => {
-    // Only save if we have all necessary values
-    if (busLineId && originId && destinationId) {
+    const hasOrigin = originId && stops.some(stop => stop.id === originId);
+    const hasDestination = destinationId && stops.some(stop => stop.id === destinationId);
+
+    if (busLineId && hasOrigin && hasDestination) {
       localStorage.setItem('busLine', busLineId);
       localStorage.setItem('busLineSearch', busLineSearch);
       localStorage.setItem('originId', originId);
       localStorage.setItem('destinationId', destinationId);
+      return;
     }
-  }, [busLineId, busLineSearch, originId, destinationId]);
+
+    localStorage.removeItem('originId');
+    localStorage.removeItem('destinationId');
+
+    if (!busLineId) {
+      localStorage.removeItem('busLine');
+      localStorage.removeItem('busLineSearch');
+    }
+  }, [busLineId, busLineSearch, originId, destinationId, stops]);
 
   // Update URL with current parameters
-  const updateUrl = useCallback((params: Record<string, string>) => {
-    const urlParams = new URLSearchParams();
+  const syncUrl = useCallback((overrides: Partial<{
+    busLineId: string | null;
+    originId: string | null;
+    destinationId: string | null;
+    enableCutoff: boolean;
+    cutoffTime: string | null;
+  }> = {}) => {
+    const effectiveBusLineId = overrides.busLineId !== undefined ? overrides.busLineId : busLineId;
+    const effectiveOriginId = overrides.originId !== undefined ? overrides.originId : originId;
+    const effectiveDestinationId = overrides.destinationId !== undefined ? overrides.destinationId : destinationId;
+    const effectiveEnableCutoff = overrides.enableCutoff !== undefined ? overrides.enableCutoff : enableCutoff;
+    const effectiveCutoffTime = overrides.cutoffTime !== undefined ? overrides.cutoffTime : cutoffTime;
 
-    // Only add parameters that have values
-    if (busLineId) urlParams.set('busLine', busLineId);
-    if (originId) urlParams.set('originId', originId);
-    if (destinationId) urlParams.set('destinationId', destinationId);
-    if (enableCutoff) {
-      urlParams.set('cutoff', 'true');
-      urlParams.set('time', cutoffTime);
+    const params = new URLSearchParams();
+
+    if (effectiveBusLineId) params.set('busLine', effectiveBusLineId);
+    if (effectiveOriginId) params.set('originId', effectiveOriginId);
+    if (effectiveDestinationId) params.set('destinationId', effectiveDestinationId);
+
+    if (effectiveEnableCutoff) {
+      params.set('cutoff', 'true');
+      if (effectiveCutoffTime) {
+        params.set('time', effectiveCutoffTime);
+      }
     }
 
-    // Add or override with new parameters
-    Object.entries(params).forEach(([key, value]) => {
-      if (value === 'false') {
-        urlParams.delete(key);
-      } else {
-        urlParams.set(key, value);
-      }
-    });
+    const newParamsString = params.toString();
+    const pathname = window.location.pathname;
+    const destination = newParamsString ? `${pathname}?${newParamsString}` : pathname;
+    const currentFullPath = `${window.location.pathname}${window.location.search}`;
 
-    // Only update URL if parameters have changed
-    const currentUrl = new URL(window.location.href);
-    const currentParams = new URLSearchParams(currentUrl.search);
-    const newParamsString = urlParams.toString();
-    const currentParamsString = currentParams.toString();
-
-    if (newParamsString !== currentParamsString) {
-      router.replace(`?${newParamsString}`);
+    if (destination !== currentFullPath) {
+      router.replace(destination);
     }
   }, [busLineId, originId, destinationId, enableCutoff, cutoffTime, router]);
 
@@ -241,6 +264,7 @@ const BusTrackerContent = () => {
     setBusLineSearch(`${line.shortName} - ${extractRouteName(line.longName)}`);
     setShowBusLineResults(false);
     setBusLineId(line.id);
+    syncUrl({ busLineId: line.id, originId: null, destinationId: null });
     
     // Don't override with geolocation if URL parameters are present
     const urlOriginId = query.get('originId');
@@ -250,6 +274,11 @@ const BusTrackerContent = () => {
       await fetchStopsForLine(line.id, urlOriginId, urlDestinationId);
       setOriginId(urlOriginId);
       setDestinationId(urlDestinationId);
+      syncUrl({
+        busLineId: line.id,
+        originId: urlOriginId,
+        destinationId: urlDestinationId,
+      });
       return;
     }
 
@@ -397,9 +426,10 @@ const BusTrackerContent = () => {
           setOriginId(matchingStop.id);
 
           // Update URL with the bus line and origin
-          updateUrl({
-            busLine: line.id,
-            originId: matchingStop.id
+          syncUrl({
+            busLineId: line.id,
+            originId: matchingStop.id,
+            destinationId: null,
           });
           return;
         }
@@ -460,18 +490,20 @@ const BusTrackerContent = () => {
         setStops(data.stops);
 
         // Update URL with the bus line and origin
-        updateUrl({
-          busLine: line.id,
-          originId: closestStop.id
+        syncUrl({
+          busLineId: line.id,
+          originId: closestStop.id,
+          destinationId: null,
         });
       } else {
         // If no directions available, fall back to old behavior
         setStops(data.stops);
         const closestStop = data.stops[0];
         setOriginId(closestStop.id);
-        updateUrl({
-          busLine: line.id,
-          originId: closestStop.id
+        syncUrl({
+          busLineId: line.id,
+          originId: closestStop.id,
+          destinationId: null,
         });
       }
 
@@ -501,20 +533,20 @@ const BusTrackerContent = () => {
     setStopsLoading(true);
     try {
       // Cancel any previous request
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
+      if (stopsAbortControllerRef.current) {
+        stopsAbortControllerRef.current.abort();
       }
       
       // Create new abort controller
-      abortControllerRef.current = new AbortController();
+      stopsAbortControllerRef.current = new AbortController();
       const timeoutId = setTimeout(() => {
-        if (abortControllerRef.current) {
-          abortControllerRef.current.abort();
+        if (stopsAbortControllerRef.current) {
+          stopsAbortControllerRef.current.abort();
         }
       }, 10000); // 10 second timeout
 
       const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(lineId)}`, {
-        signal: abortControllerRef.current.signal,
+        signal: stopsAbortControllerRef.current.signal,
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache'
@@ -522,7 +554,7 @@ const BusTrackerContent = () => {
       });
 
       clearTimeout(timeoutId);
-      abortControllerRef.current = null;
+      stopsAbortControllerRef.current = null;
 
       // Handle not-found errors more gracefully (API returns 404 when no stops are found)
       if (response.status === 404) {
@@ -533,6 +565,7 @@ const BusTrackerContent = () => {
         setSelectedDirection('');
         setOriginId('');
         setDestinationId('');
+        syncUrl({ busLineId: lineId, originId: null, destinationId: null });
         // Restore bus line info
         setBusLineSearch(currentBusLineSearch);
         return;
@@ -595,19 +628,22 @@ const BusTrackerContent = () => {
               originId: preserveOriginId,
               destinationId: preserveDestinationId
             });
-            updateUrl({
+            syncUrl({
+              busLineId: lineId,
               originId: preserveOriginId,
-              destinationId: preserveDestinationId
+              destinationId: preserveDestinationId,
             });
           } else {
             batchUpdate({
               originId: '',
               destinationId: ''
             });
+            syncUrl({ originId: null, destinationId: null });
           }
         } else {
           setOriginId('');
           setDestinationId('');
+          syncUrl({ originId: null, destinationId: null });
         }
       } else {
         console.warn('No stops found in the API response');
@@ -632,12 +668,16 @@ const BusTrackerContent = () => {
       setSelectedDirection('');
       setOriginId('');
       setDestinationId('');
+      syncUrl({ busLineId: lineId, originId: null, destinationId: null });
       // Restore bus line info
       setBusLineSearch(currentBusLineSearch);
     } finally {
+      if (stopsAbortControllerRef.current) {
+        stopsAbortControllerRef.current = null;
+      }
       setStopsLoading(false);
     }
-  }, [updateUrl, busLineSearch]);
+  }, [syncUrl, busLineSearch, batchUpdate, setBusStopError, setStops, setDirections, setSelectedDirection, setOriginId, setDestinationId, setStopsLoading, setBusLineSearch]);
 
   // Handle cutoff settings from URL
   useEffect(() => {
@@ -647,7 +687,7 @@ const BusTrackerContent = () => {
       setEnableCutoff(true);
       if (urlTime) setCutoffTime(urlTime);
     }
-  }, [query]);
+  }, [query, setEnableCutoff, setCutoffTime]);
 
   // Handle search input for bus lines
   const handleBusLineSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -674,23 +714,37 @@ const BusTrackerContent = () => {
 
   // Search for bus lines
   const searchBusLines = async (query: string) => {
+    if (searchAbortControllerRef.current) {
+      searchAbortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    searchAbortControllerRef.current = controller;
     setBusLineLoading(true);
+
     try {
-      const response = await fetch(`/api/bus-lines?q=${encodeURIComponent(query)}`);
+      const response = await fetch(`/api/bus-lines?q=${encodeURIComponent(query)}`, {
+        signal: controller.signal,
+      });
       if (!response.ok) throw new Error('Failed to fetch bus lines');
 
       const responseData = await response.json();
       const data = responseData.success ? responseData.data : responseData;
-      setBusLineResults(data.busLines || []);
-      setShowBusLineResults(true);
+
+      if (!controller.signal.aborted) {
+        setBusLineResults(data.busLines || []);
+        setShowBusLineResults(true);
+      }
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        // Request was aborted, don't set error
         return;
       }
       console.error('Error searching bus lines:', err);
       setBusLineResults([]);
     } finally {
+      if (searchAbortControllerRef.current === controller) {
+        searchAbortControllerRef.current = null;
+      }
       setBusLineLoading(false);
     }
   };
@@ -699,33 +753,18 @@ const BusTrackerContent = () => {
   useEffect(() => {
     if (busLineId && busLineSearch) {
       currentBusLineRef.current = { id: busLineId, search: busLineSearch };
+    } else {
+      currentBusLineRef.current = { id: '', search: '' };
     }
   }, [busLineId, busLineSearch]);
 
-  // Separate effect for title updates
   useEffect(() => {
-    const updateTitle = () => {
-      const { id, search } = currentBusLineRef.current;
-      if (id && search) {
-        document.title = `${search.split(' - ')[0]} Bus Tracker`;
-      } else {
-        document.title = 'Bus Tracker';
-      }
-    };
-
-    // Update title immediately
-    updateTitle();
-
-    // Set up an interval to check and update the title
-    titleIntervalRef.current = setInterval(updateTitle, 100);
-
-    return () => {
-      if (titleIntervalRef.current) {
-        clearInterval(titleIntervalRef.current);
-        titleIntervalRef.current = null;
-      }
-    };
-  }, []);
+    if (busLineId && busLineSearch) {
+      document.title = `${busLineSearch.split(' - ')[0]} Bus Tracker`;
+    } else {
+      document.title = 'Bus Tracker';
+    }
+  }, [busLineId, busLineSearch]);
 
   // Helper function to find closest stop in a list
   const findClosestStopInList = (lat: number, lon: number, stopList: BusStop[]): BusStop | null => {
@@ -807,9 +846,9 @@ const BusTrackerContent = () => {
         });
 
         // Update URL parameters
-        updateUrl({
-          originId: newOriginId || '',
-          destinationId: newDestinationId || ''
+        syncUrl({
+          originId: newOriginId || null,
+          destinationId: newDestinationId || null,
         });
       }
     } else {
@@ -824,22 +863,26 @@ const BusTrackerContent = () => {
       });
 
       // Update URL with swapped values
-      updateUrl({
-        originId: tempDestination,
-        destinationId: tempOrigin
+      syncUrl({
+        originId: tempDestination || null,
+        destinationId: tempOrigin || null,
       });
     }
   };
 
   const handleCutoffChange = (value: boolean) => {
     setEnableCutoff(value);
-    updateUrl(value ? { cutoff: 'true', time: cutoffTime } : { cutoff: 'false' });
+    syncUrl(
+      value
+        ? { enableCutoff: true, cutoffTime }
+        : { enableCutoff: false, cutoffTime: null }
+    );
   };
 
   const handleCutoffTimeChange = (time: string) => {
     setCutoffTime(time);
     if (enableCutoff) {
-      updateUrl({ time });
+      syncUrl({ cutoffTime: time });
     }
   };
 
@@ -847,7 +890,7 @@ const BusTrackerContent = () => {
     // If no destination is selected yet, just set the origin
     if (!destinationId) {
       setOriginId(newOriginId);
-      updateUrl({ originId: newOriginId });
+      syncUrl({ originId: newOriginId, destinationId });
       return;
     }
 
@@ -883,20 +926,20 @@ const BusTrackerContent = () => {
         setOriginId(originInNewDir.id);
         setDestinationId(destInNewDir.id);
         triggerForceUpdate();
-        updateUrl({
+        syncUrl({
           originId: originInNewDir.id,
-          destinationId: destInNewDir.id
+          destinationId: destInNewDir.id,
         });
       } else {
         // If we can't find matching stops in the new direction, just set the origin
         setOriginId(newOriginId);
-        updateUrl({ originId: newOriginId });
+        syncUrl({ originId: newOriginId, destinationId });
       }
     } else {
       // If stops are in correct sequence or we only have one direction,
       // just set the new origin
       setOriginId(newOriginId);
-      updateUrl({ originId: newOriginId });
+      syncUrl({ originId: newOriginId, destinationId });
     }
   };
 
@@ -904,7 +947,7 @@ const BusTrackerContent = () => {
     // If no origin is selected yet, just set the destination
     if (!originId) {
       setDestinationId(newDestinationId);
-      updateUrl({ destinationId: newDestinationId });
+      syncUrl({ originId, destinationId: newDestinationId });
       return;
     }
 
@@ -940,20 +983,20 @@ const BusTrackerContent = () => {
         setOriginId(originInNewDir.id);
         setDestinationId(destInNewDir.id);
         triggerForceUpdate();
-        updateUrl({
+        syncUrl({
           originId: originInNewDir.id,
-          destinationId: destInNewDir.id
+          destinationId: destInNewDir.id,
         });
       } else {
         // If we can't find matching stops in the new direction, just set the destination
         setDestinationId(newDestinationId);
-        updateUrl({ destinationId: newDestinationId });
+        syncUrl({ originId, destinationId: newDestinationId });
       }
     } else {
       // If stops are in correct sequence or we only have one direction,
       // just set the new destination
       setDestinationId(newDestinationId);
-      updateUrl({ destinationId: newDestinationId });
+      syncUrl({ originId, destinationId: newDestinationId });
     }
   };
 
@@ -968,7 +1011,13 @@ const BusTrackerContent = () => {
     localStorage.removeItem('destinationId');
 
     // Clear URL parameters
-    router.replace('/');
+    syncUrl({
+      busLineId: null,
+      originId: null,
+      destinationId: null,
+      enableCutoff: false,
+      cutoffTime: null,
+    });
 
     // Reset all state using the reducer action
     resetAll();
@@ -993,13 +1042,13 @@ const BusTrackerContent = () => {
         const url = `/api/bus-times?busLine=${encodeURIComponent(busLineId)}&originId=${encodeURIComponent(originId)}&destinationId=${encodeURIComponent(destinationId)}`;
         
         // Cancel any previous request
-        if (abortControllerRef.current) {
-          abortControllerRef.current.abort();
+        if (arrivalsAbortControllerRef.current) {
+          arrivalsAbortControllerRef.current.abort();
         }
         
-        abortControllerRef.current = new AbortController();
+        arrivalsAbortControllerRef.current = new AbortController();
         const response = await fetch(url, {
-          signal: abortControllerRef.current.signal
+          signal: arrivalsAbortControllerRef.current.signal
         });
 
         if (!response.ok) throw new Error('Failed to fetch bus data');
@@ -1058,7 +1107,7 @@ const BusTrackerContent = () => {
         }
 
         setLastRefresh(new Date());
-        abortControllerRef.current = null;
+        arrivalsAbortControllerRef.current = null;
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
           // Request was aborted, don't set error
@@ -1067,6 +1116,9 @@ const BusTrackerContent = () => {
         setError('Unable to load bus arrival times. Please try again later.');
         console.error('Error fetching bus data:', err);
       } finally {
+        if (arrivalsAbortControllerRef.current) {
+          arrivalsAbortControllerRef.current = null;
+        }
         setLoading(false);
       }
     };
@@ -1079,12 +1131,12 @@ const BusTrackerContent = () => {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
+      if (arrivalsAbortControllerRef.current) {
+        arrivalsAbortControllerRef.current.abort();
+        arrivalsAbortControllerRef.current = null;
       }
     };
-  }, [busLineId, originId, destinationId]);
+  }, [busLineId, originId, destinationId, setArrivals, setData, setError, setLastRefresh, setLoading]);
 
   useEffect(() => {
     countdownRef.current = setInterval(() => {
@@ -1100,7 +1152,7 @@ const BusTrackerContent = () => {
         countdownRef.current = null;
       }
     };
-  }, [lastRefresh]);
+  }, [lastRefresh, setNextRefreshIn]);
 
 
 
