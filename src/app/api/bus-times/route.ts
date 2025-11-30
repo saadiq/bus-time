@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 import { validateBusLineId, validateStopId, ValidationError, isRateLimited, getClientId } from '@/lib/validation';
+import { fetchStopInfo } from '@/lib/mta-api';
 import { BusData, ApiResponse } from '@/types';
 
 // Rate limiting storage
@@ -197,49 +198,14 @@ export async function GET(request: NextRequest) {
       throw error;
     }
 
-    // Fetch origin stop info
-    const originResponse = await fetch(
-      `${request.nextUrl.origin}/api/bus-stops/info?stopId=${encodeURIComponent(
-        originId
-      )}`,
-      {
-        cache: "no-store",
-      }
-    );
+    // Fetch stop info directly from MTA API (avoids internal HTTP calls that fail with Vercel auth)
+    const [originStopInfo, destinationStopInfo] = await Promise.all([
+      fetchStopInfo(originId),
+      fetchStopInfo(destinationId)
+    ]);
 
-    if (!originResponse.ok) {
-      return NextResponse.json(
-        { error: "Failed to fetch origin stop info" },
-        { status: 500 }
-      );
-    }
-
-    const originData = await originResponse.json();
-    // Handle API response structure - check if it's wrapped in success/data
-    const originStopData = originData.success ? originData.data : originData;
-    const originName = originStopData?.entry?.name || originStopData?.name || "Unknown Origin";
-
-    // Fetch destination stop info
-    const destinationResponse = await fetch(
-      `${request.nextUrl.origin}/api/bus-stops/info?stopId=${encodeURIComponent(
-        destinationId
-      )}`,
-      {
-        cache: "no-store",
-      }
-    );
-
-    if (!destinationResponse.ok) {
-      return NextResponse.json(
-        { error: "Failed to fetch destination stop info" },
-        { status: 500 }
-      );
-    }
-
-    const destinationData = await destinationResponse.json();
-    // Handle API response structure - check if it's wrapped in success/data
-    const destinationStopData = destinationData.success ? destinationData.data : destinationData;
-    const destinationName = destinationStopData?.entry?.name || destinationStopData?.name || "Unknown Destination";
+    const originName = originStopInfo?.name || "Unknown Origin";
+    const destinationName = destinationStopInfo?.name || "Unknown Destination";
 
     // Only use real-time data
     try {

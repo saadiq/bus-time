@@ -5,12 +5,14 @@ import { Switch } from '@headlessui/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { BusLine, BusStop, BusResponse, NearbyBusLine } from '@/types';
 import { useBusTracker } from '@/hooks/useBusTracker';
-import { 
-  useDistanceCalculation, 
-  useDirectionStops, 
-  useBusStatus, 
-  useTimeFormatting
+import {
+  useDistanceCalculation,
+  useDirectionStops,
+  useBusStatus,
+  useTimeFormatting,
+  useStopMatching
 } from '@/hooks/useMemoizedComputations';
+import { SAME_LOCATION_THRESHOLD } from '@/lib/geo';
 
 
 const POLLING_INTERVAL = 30000; // 30 seconds
@@ -54,6 +56,7 @@ const BusTrackerContent = () => {
   const currentStops = useDirectionStops(stops, directions, selectedDirection);
   const getBusStatus = useBusStatus(enableCutoff, cutoffTime);
   const { formatTime, getMinutesUntil } = useTimeFormatting();
+  const findMatchingStop = useStopMatching();
   
   // Get stop names from loaded stops data
   const getStopName = (stopId: string) => {
@@ -265,12 +268,11 @@ const BusTrackerContent = () => {
     setShowBusLineResults(false);
     setBusLineId(line.id);
     syncUrl({ busLineId: line.id, originId: null, destinationId: null });
-    
+
     // Don't override with geolocation if URL parameters are present
     const urlOriginId = query.get('originId');
     const urlDestinationId = query.get('destinationId');
     if (urlOriginId && urlDestinationId) {
-      // Just fetch stops without geolocation logic
       await fetchStopsForLine(line.id, urlOriginId, urlDestinationId);
       setOriginId(urlOriginId);
       setDestinationId(urlDestinationId);
@@ -291,152 +293,7 @@ const BusTrackerContent = () => {
         });
       });
 
-      // Normalize a stop name into a set of street names
-      const normalizeIntoStreets = (name: string): string[] => {
-        // Remove common prefixes and normalize abbreviations
-        const withoutPrefix = name.replace(/^SBS\s+/, '').replace(/^[A-Z]\d+\s+/, '');
-
-        const withNormalizedAbbrev = withoutPrefix
-          .replace(/\bWLMSBRG\b/gi, 'WILLIAMSBURG')
-          .replace(/\bBRDG\b/gi, 'BRIDGE')
-          .replace(/\bPLZ\b/gi, 'PLAZA')
-          .replace(/\bNSTRND\b/gi, 'NOSTRAND')
-          .replace(/\bRGRS\b/gi, 'ROGERS')
-          .replace(/\bMKR\b/gi, 'MEEKER')
-          .replace(/\bAV\b/gi, 'AVENUE')
-          .replace(/\bST\b/gi, 'STREET');
-
-        // Convert to lowercase and split on slash
-        const parts = withNormalizedAbbrev.toLowerCase().split('/');
-
-        // Process each street name
-        return parts.map(part => {
-          // Remove common suffixes and normalize spaces
-          return part
-            .replace(/(avenue|ave|av)$/g, '')
-            .replace(/(street|str|st)$/g, '')
-            .replace(/(road|rd)$/g, '')
-            .replace(/(place|pl)$/g, '')
-            .replace(/(boulevard|blvd)$/g, '')
-            .replace(/\s+/g, '')
-            .trim();
-        }).filter(Boolean);
-      };
-
-      // If this is a nearby bus line, it already has the closest stop info
-      if ('closestStop' in line) {
-        const nearbyLine = line as NearbyBusLine;
-
-        // Fetch stops for this line
-        const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(line.id)}`, {
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache'
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch bus stops');
-        }
-
-        const responseData = await response.json();
-        const data = responseData.success ? responseData.data : responseData;
-        if (!data.stops || data.stops.length === 0) {
-          throw new Error('No stops found for this line');
-        }
-
-        // Set directions first if available
-        if (data.directions && data.directions.length > 0) {
-          setDirections(data.directions);
-          setSelectedDirection(data.directions[0].id);
-        }
-
-        // Find the stop that matches the closest stop name
-        let matchingStop = null;
-        let matchFound = false;
-
-        const targetStreets = normalizeIntoStreets(nearbyLine.closestStop.name);
-
-        // Special handling for B48 and B44-SBS
-        const isSBS = line.id.includes('B44+');
-        const isB48 = line.id.includes('B48');
-
-        // Get stops for the current direction
-        const currentDirection = data.directions[0];
-        const directionStops = data.stops.filter((s: BusStop) => s.direction === currentDirection.name);
-
-        for (const stop of directionStops) {
-          // Skip stops that don't match the route type
-          if (isSBS) {
-            const isSBSStop = stop.direction.includes('SBS');
-            if (!isSBSStop) continue;
-          }
-
-          // For B48, check if it's in the right direction
-          if (isB48) {
-            const isCorrectDirection = stop.direction.includes('LEFFERTS GARDENS') ||
-              stop.direction.includes('GREENPOINT');
-            if (!isCorrectDirection) continue;
-          }
-
-          const currentStreets = normalizeIntoStreets(stop.name);
-
-          // Check if both streets match in either order
-          const streetsMatch =
-            (targetStreets[0] === currentStreets[0] && targetStreets[1] === currentStreets[1]) ||
-            (targetStreets[0] === currentStreets[1] && targetStreets[1] === currentStreets[0]);
-
-          if (streetsMatch) {
-            matchingStop = stop;
-            matchFound = true;
-            break;
-          }
-        }
-
-        if (!matchFound) {
-          // If no exact match found in current direction, find closest stop by distance
-          let closestStop = directionStops[0];
-          let minDistance = calculateDistance(
-            position.coords.latitude,
-            position.coords.longitude,
-            closestStop.lat,
-            closestStop.lon
-          );
-
-          for (const stop of directionStops) {
-            const distance = calculateDistance(
-              position.coords.latitude,
-              position.coords.longitude,
-              stop.lat,
-              stop.lon
-            );
-            if (distance < minDistance) {
-              minDistance = distance;
-              closestStop = stop;
-            }
-          }
-          matchingStop = closestStop;
-        }
-
-        if (matchingStop) {
-          // Set the stops
-          setStops(data.stops);
-
-          // Now set the origin and update URL
-          setOriginId(matchingStop.id);
-
-          // Update URL with the bus line and origin
-          syncUrl({
-            busLineId: line.id,
-            originId: matchingStop.id,
-            destinationId: null,
-          });
-          return;
-        }
-      }
-
-      // If we don't have closest stop info or couldn't find the matching stop,
-      // fall back to calculating distances
+      // Fetch stops for this line
       const response = await fetch(`/api/bus-stops?lineId=${encodeURIComponent(line.id)}`, {
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -458,62 +315,57 @@ const BusTrackerContent = () => {
       if (data.directions && data.directions.length > 0) {
         setDirections(data.directions);
         setSelectedDirection(data.directions[0].id);
+      }
 
-        // Get stops for the current direction
-        const currentDirection = data.directions[0];
-        const directionStops = data.stops.filter((s: BusStop) => s.direction === currentDirection.name);
+      // Get stops for the current direction
+      const currentDirection = data.directions?.[0];
+      const directionStops = currentDirection
+        ? data.stops.filter((s: BusStop) => s.direction === currentDirection.name)
+        : data.stops;
 
-        // Find the closest stop in the current direction
-        let closestStop = directionStops[0];
-        let minDistance = calculateDistance(
+      // Find the best matching stop
+      let matchingStop: BusStop | null = null;
+
+      // If this is a nearby bus line with closest stop info, use name matching
+      if ('closestStop' in line) {
+        const nearbyLine = line as NearbyBusLine;
+        matchingStop = findMatchingStop(
+          directionStops,
+          nearbyLine.closestStop.name,
           position.coords.latitude,
           position.coords.longitude,
-          directionStops[0].lat,
-          directionStops[0].lon
+          line.id
         );
+      }
 
-        for (const stop of directionStops) {
-          const distance = calculateDistance(
-            position.coords.latitude,
-            position.coords.longitude,
-            stop.lat,
-            stop.lon
-          );
-          if (distance < minDistance) {
-            minDistance = distance;
-            closestStop = stop;
-          }
-        }
+      // If no match found or no closest stop info, find closest by distance
+      if (!matchingStop && directionStops.length > 0) {
+        matchingStop = findClosestStopInList(
+          position.coords.latitude,
+          position.coords.longitude,
+          directionStops
+        );
+      }
 
-        // Set the closest stop as the origin
-        setOriginId(closestStop.id);
+      // Fallback to first stop if still no match
+      if (!matchingStop && data.stops.length > 0) {
+        matchingStop = data.stops[0];
+      }
+
+      if (matchingStop) {
         setStops(data.stops);
-
-        // Update URL with the bus line and origin
+        setOriginId(matchingStop.id);
         syncUrl({
           busLineId: line.id,
-          originId: closestStop.id,
-          destinationId: null,
-        });
-      } else {
-        // If no directions available, fall back to old behavior
-        setStops(data.stops);
-        const closestStop = data.stops[0];
-        setOriginId(closestStop.id);
-        syncUrl({
-          busLineId: line.id,
-          originId: closestStop.id,
+          originId: matchingStop.id,
           destinationId: null,
         });
       }
-
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        // Request was aborted, don't set error
         return;
       }
       console.error('Error finding closest stop:', err);
-      // If there's an error, just fetch stops without setting an origin
       fetchStopsForLine(line.id);
     }
   };
@@ -915,10 +767,10 @@ const BusTrackerContent = () => {
 
       // Find the corresponding stops in the new direction
       const originInNewDir = newDirectionStops.find(s =>
-        calculateDistance(s.lat, s.lon, newOriginStop.lat, newOriginStop.lon) < 0.1
+        calculateDistance(s.lat, s.lon, newOriginStop.lat, newOriginStop.lon) < SAME_LOCATION_THRESHOLD
       );
       const destInNewDir = newDirectionStops.find(s =>
-        calculateDistance(s.lat, s.lon, currentDestStop.lat, currentDestStop.lon) < 0.1
+        calculateDistance(s.lat, s.lon, currentDestStop.lat, currentDestStop.lon) < SAME_LOCATION_THRESHOLD
       );
 
       if (originInNewDir && destInNewDir) {
@@ -972,10 +824,10 @@ const BusTrackerContent = () => {
 
       // Find the corresponding stops in the new direction
       const originInNewDir = newDirectionStops.find(s =>
-        calculateDistance(s.lat, s.lon, currentOriginStop.lat, currentOriginStop.lon) < 0.1
+        calculateDistance(s.lat, s.lon, currentOriginStop.lat, currentOriginStop.lon) < SAME_LOCATION_THRESHOLD
       );
       const destInNewDir = newDirectionStops.find(s =>
-        calculateDistance(s.lat, s.lon, newDestStop.lat, newDestStop.lon) < 0.1
+        calculateDistance(s.lat, s.lon, newDestStop.lat, newDestStop.lon) < SAME_LOCATION_THRESHOLD
       );
 
       if (originInNewDir && destInNewDir) {

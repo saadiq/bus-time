@@ -1,26 +1,12 @@
 import { useMemo, useCallback } from 'react';
 import { BusStop, Direction } from '@/types';
+import { calculateDistance } from '@/lib/geo';
+import { getStopFilterForRoute } from '@/lib/routeConfig';
 
-// Memoized Haversine distance calculation
+// Memoized wrapper for shared distance calculation
 export const useDistanceCalculation = () => {
-  return useCallback((
-    lat1: number,
-    lon1: number,
-    lat2: number,
-    lon2: number
-  ): number => {
-    const R = 3959; // Earth's radius in miles
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLon = ((lon2 - lon1) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  }, []);
+  // Return stable reference to shared function
+  return useCallback(calculateDistance, []);
 };
 
 // Memoized stop normalization for matching
@@ -192,7 +178,7 @@ export const useTimeFormatting = () => {
 // Memoized stop matching for nearby bus lines
 export const useStopMatching = () => {
   const normalizeStops = useStopNormalization();
-  const calculateDistance = useDistanceCalculation();
+  const distanceCalc = useDistanceCalculation();
 
   return useCallback((
     stops: BusStop[],
@@ -202,26 +188,17 @@ export const useStopMatching = () => {
     busLineId: string
   ) => {
     const targetStreets = normalizeStops(targetStopName);
-    
-    // Special handling for specific bus lines
-    const isSBS = busLineId.includes('B44+');
-    const isB48 = busLineId.includes('B48');
+
+    // Get route-specific stop filter from configuration
+    const stopFilter = getStopFilterForRoute(busLineId);
 
     let matchingStop = null;
     let matchFound = false;
 
     for (const stop of stops) {
-      // Skip stops that don't match the route type
-      if (isSBS) {
-        const isSBSStop = stop.direction.includes('SBS');
-        if (!isSBSStop) continue;
-      }
-
-      // For B48, check if it's in the right direction
-      if (isB48) {
-        const isCorrectDirection = stop.direction.includes('LEFFERTS GARDENS') ||
-          stop.direction.includes('GREENPOINT');
-        if (!isCorrectDirection) continue;
+      // Apply route-specific filtering if configured
+      if (stopFilter && !stopFilter(stop)) {
+        continue;
       }
 
       const currentStreets = normalizeStops(stop.name);
@@ -239,30 +216,38 @@ export const useStopMatching = () => {
     }
 
     if (!matchFound && stops.length > 0) {
-      // If no exact match found, find closest stop by distance
-      let closestStop = stops[0];
-      let minDistance = calculateDistance(
-        userLat,
-        userLon,
-        closestStop.lat,
-        closestStop.lon
-      );
+      // Filter stops based on route config for distance fallback
+      const eligibleStops = stopFilter ? stops.filter(stopFilter) : stops;
 
-      for (const stop of stops) {
-        const distance = calculateDistance(
+      if (eligibleStops.length > 0) {
+        // Find closest stop by distance
+        let closestStop = eligibleStops[0];
+        let minDistance = distanceCalc(
           userLat,
           userLon,
-          stop.lat,
-          stop.lon
+          closestStop.lat,
+          closestStop.lon
         );
-        if (distance < minDistance) {
-          minDistance = distance;
-          closestStop = stop;
+
+        for (const stop of eligibleStops) {
+          const distance = distanceCalc(
+            userLat,
+            userLon,
+            stop.lat,
+            stop.lon
+          );
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestStop = stop;
+          }
         }
+        matchingStop = closestStop;
+      } else if (stops.length > 0) {
+        // Fallback to first stop if no eligible stops
+        matchingStop = stops[0];
       }
-      matchingStop = closestStop;
     }
 
     return matchingStop;
-  }, [normalizeStops, calculateDistance]);
+  }, [normalizeStops, distanceCalc]);
 };
