@@ -42,22 +42,3 @@ export function getStopFilterForRoute(busLineId: string): ((stop: BusStop) => bo
   );
   return config?.stopFilter;
 }
-
-/**
- * Filter stops based on route-specific rules
- * If no special rules apply, returns all stops
- */
-export function filterStopsForRoute(stops: BusStop[], busLineId: string): BusStop[] {
-  const filter = getStopFilterForRoute(busLineId);
-  if (!filter) return stops;
-  return stops.filter(filter);
-}
-
-/**
- * Check if a bus line requires special stop filtering
- */
-export function hasSpecialStopFiltering(busLineId: string): boolean {
-  return ROUTE_CONFIGS.some(c =>
-    c.idPatterns.some(pattern => busLineId.includes(pattern))
-  );
-}
