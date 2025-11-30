@@ -6,7 +6,11 @@ import { getStopFilterForRoute } from '@/lib/routeConfig';
 // Memoized wrapper for shared distance calculation
 export const useDistanceCalculation = () => {
   // Return stable reference to shared function
-  return useCallback(calculateDistance, []);
+  return useCallback(
+    (lat1: number, lon1: number, lat2: number, lon2: number) =>
+      calculateDistance(lat1, lon1, lat2, lon2),
+    []
+  );
 };
 
 // Memoized stop normalization for matching
