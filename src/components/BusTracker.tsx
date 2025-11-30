@@ -18,6 +18,50 @@ import { SAME_LOCATION_THRESHOLD } from '@/lib/geo';
 const POLLING_INTERVAL = 30000; // 30 seconds
 const DEBOUNCE_DELAY = 300; // ms for debouncing typeahead search
 
+// Safe localStorage helpers (guards against SSR and broken implementations like bun's mock)
+const isLocalStorageAvailable = (): boolean => {
+  try {
+    if (typeof window === 'undefined') return false;
+    if (typeof window.localStorage === 'undefined') return false;
+    if (typeof window.localStorage.getItem !== 'function') return false;
+    if (typeof window.localStorage.setItem !== 'function') return false;
+    // Test actual functionality
+    const testKey = '__storage_test__';
+    window.localStorage.setItem(testKey, testKey);
+    window.localStorage.removeItem(testKey);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const safeLocalStorage = {
+  getItem: (key: string): string | null => {
+    if (!isLocalStorageAvailable()) return null;
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    if (!isLocalStorageAvailable()) return;
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {
+      // Ignore storage errors
+    }
+  },
+  removeItem: (key: string): void => {
+    if (!isLocalStorageAvailable()) return;
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // Ignore storage errors
+    }
+  }
+};
+
 const BusTrackerContent = () => {
   const router = useRouter();
   const query = useSearchParams();
@@ -26,7 +70,7 @@ const BusTrackerContent = () => {
   // Destructure state for easier access
   const {
     arrivals, error, busStopError, loading, data, cutoffTime, enableCutoff,
-    lastRefresh, nextRefreshIn, busLineSearch, busLineResults, busLineLoading,
+    lastRefresh, nextRefreshIn, busLineSearch, busLineResults, busLineLoading: _busLineLoading,
     showBusLineResults, stops, directions, selectedDirection, stopsLoading,
     busLineId, originId, destinationId, isConfigOpen, forceUpdate,
     geoLoading, geoError
@@ -117,10 +161,10 @@ const BusTrackerContent = () => {
           return;
         }
 
-        const storedBusLine = localStorage.getItem('busLine');
-        const storedOriginId = localStorage.getItem('originId');
-        const storedDestinationId = localStorage.getItem('destinationId');
-        const storedBusLineSearch = localStorage.getItem('busLineSearch');
+        const storedBusLine = safeLocalStorage.getItem('busLine');
+        const storedOriginId = safeLocalStorage.getItem('originId');
+        const storedDestinationId = safeLocalStorage.getItem('destinationId');
+        const storedBusLineSearch = safeLocalStorage.getItem('busLineSearch');
 
         if (storedBusLine && storedOriginId && storedDestinationId) {
           setBusLineId(storedBusLine);
@@ -156,19 +200,19 @@ const BusTrackerContent = () => {
     const hasDestination = destinationId && stops.some(stop => stop.id === destinationId);
 
     if (busLineId && hasOrigin && hasDestination) {
-      localStorage.setItem('busLine', busLineId);
-      localStorage.setItem('busLineSearch', busLineSearch);
-      localStorage.setItem('originId', originId);
-      localStorage.setItem('destinationId', destinationId);
+      safeLocalStorage.setItem('busLine', busLineId);
+      safeLocalStorage.setItem('busLineSearch', busLineSearch);
+      safeLocalStorage.setItem('originId', originId);
+      safeLocalStorage.setItem('destinationId', destinationId);
       return;
     }
 
-    localStorage.removeItem('originId');
-    localStorage.removeItem('destinationId');
+    safeLocalStorage.removeItem('originId');
+    safeLocalStorage.removeItem('destinationId');
 
     if (!busLineId) {
-      localStorage.removeItem('busLine');
-      localStorage.removeItem('busLineSearch');
+      safeLocalStorage.removeItem('busLine');
+      safeLocalStorage.removeItem('busLineSearch');
     }
   }, [busLineId, busLineSearch, originId, destinationId, stops]);
 
@@ -857,10 +901,10 @@ const BusTrackerContent = () => {
     currentBusLineRef.current = { id: '', search: '' };
 
     // Clear local storage
-    localStorage.removeItem('busLine');
-    localStorage.removeItem('busLineSearch');
-    localStorage.removeItem('originId');
-    localStorage.removeItem('destinationId');
+    safeLocalStorage.removeItem('busLine');
+    safeLocalStorage.removeItem('busLineSearch');
+    safeLocalStorage.removeItem('originId');
+    safeLocalStorage.removeItem('destinationId');
 
     // Clear URL parameters
     syncUrl({
@@ -1073,31 +1117,49 @@ const BusTrackerContent = () => {
   };
 
   return (
-    <div className="max-w-lg mx-auto bg-white rounded-lg shadow-md">
-      <div className="bg-blue-500 text-white p-6 rounded-t-lg">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          🚍 {busLineId ? `${busLineSearch.split(' - ')[0]} ` : ''}Bus Tracker
-          <button
-            onClick={() => setIsConfigOpen(!isConfigOpen)}
-            className="ml-auto text-sm bg-blue-600 px-3 py-1 rounded-full hover:bg-blue-700"
-          >
-            {isConfigOpen ? 'Hide Settings' : 'Settings'}
-          </button>
-        </h1>
+    <div className="max-w-xl mx-auto">
+      {/* Header */}
+      <header className="brutal-card border-b-0">
+        <div className="p-6 pb-4">
+          <div className="flex items-baseline justify-between">
+            <h1 className="font-display text-4xl md:text-5xl tracking-tight">
+              {busLineId ? busLineSearch.split(' - ')[0] : 'BUS'}
+            </h1>
+            <button
+              onClick={() => setIsConfigOpen(!isConfigOpen)}
+              className="brutal-button brutal-button--ghost text-sm border-2"
+            >
+              {isConfigOpen ? 'CLOSE' : 'CONFIG'}
+            </button>
+          </div>
 
+          {/* Route Display */}
+          <div className="mt-4 flex items-center gap-3 text-sm font-medium">
+            <span className="w-3 h-3 bg-[var(--mta-yellow)]"></span>
+            <span className="truncate">
+              {data?.originName || getStopName(originId) || (stopsLoading && originId ? '...' : 'SELECT ORIGIN')}
+            </span>
+            <span className="text-[var(--muted)]">&rarr;</span>
+            <span className="truncate">
+              {data?.destinationName || getStopName(destinationId) || (stopsLoading && destinationId ? '...' : 'SELECT DESTINATION')}
+            </span>
+          </div>
+        </div>
+
+        {/* Settings Panel */}
         {isConfigOpen && (
-          <div className="mt-4 space-y-3 p-3 bg-blue-600 rounded-lg">
-            <div className="flex justify-between items-center">
-              <label className="text-sm mb-1">Bus Line</label>
-              <button
-                onClick={handleReset}
-                className="text-xs bg-blue-700 px-2 py-1 rounded hover:bg-blue-800 transition-colors"
-                title="Clear all settings"
-              >
-                Reset
-              </button>
-            </div>
+          <div className="border-t-[3px] border-[var(--black)] p-6 space-y-5 bg-[var(--concrete-dark)]">
+            {/* Bus Line Search */}
             <div className="relative">
+              <div className="flex justify-between items-center mb-2">
+                <label className="font-display text-sm tracking-wide">BUS LINE</label>
+                <button
+                  onClick={handleReset}
+                  className="text-xs font-medium text-[var(--muted)] hover:text-[var(--black)] transition-colors"
+                >
+                  RESET
+                </button>
+              </div>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -1109,53 +1171,46 @@ const BusTrackerContent = () => {
                     }
                     setShowBusLineResults(false);
                   }}
-                  placeholder="Start typing bus line (e.g. B52)"
-                  className="text-gray-800 rounded px-2 py-1 flex-1"
+                  placeholder="Type route (e.g. B52, M15)"
+                  className="brutal-input flex-1"
                 />
                 <button
                   onClick={handleGeolocation}
                   disabled={geoLoading}
-                  className="bg-blue-700 px-2 py-1 rounded hover:bg-blue-800 transition-colors flex items-center gap-1"
+                  className="brutal-button brutal-button--accent px-3"
                   title="Find nearby bus lines"
                 >
                   {geoLoading ? (
-                    <div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>
+                    <div className="animate-spin h-4 w-4 border-2 border-[var(--black)] border-t-transparent"></div>
                   ) : (
-                    <>
-                      <svg className="h-4 w-4 fill-current" viewBox="0 0 24 24">
-                        <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V2c0-.55-.45-1-1-1s-1 .45-1 1v1.06C6.83 3.52 3.52 6.83 3.06 11H2c-.55 0-1 .45-1 1s.45 1 1 1h1.06c.46 4.17 3.77 7.48 7.94 7.94V22c0 .55.45 1 1 1s1-.45 1-1v-1.06c4.17-.46 7.48-3.77 7.94-7.94H22c.55 0 1-.45 1-1s-.45-1-1-1h-1.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z" />
-                      </svg>
-                      <span className="sr-only">Find nearby bus lines</span>
-                    </>
+                    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V2c0-.55-.45-1-1-1s-1 .45-1 1v1.06C6.83 3.52 3.52 6.83 3.06 11H2c-.55 0-1 .45-1 1s.45 1 1 1h1.06c.46 4.17 3.77 7.48 7.94 7.94V22c0 .55.45 1 1 1s1-.45 1-1v-1.06c4.17-.46 7.48-3.77 7.94-7.94H22c.55 0 1-.45 1-1s-.45-1-1-1h-1.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z" />
+                    </svg>
                   )}
                 </button>
               </div>
+
               {geoError && (
-                <div className="absolute z-10 mt-1 w-full bg-red-50 border border-red-200 text-red-600 text-sm p-2 rounded">
+                <div className="mt-2 p-3 bg-[var(--danger)] text-white text-sm font-medium">
                   {geoError}
-                </div>
-              )}
-              {busLineLoading && (
-                <div className="absolute right-2 top-8">
-                  <div className="animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>
                 </div>
               )}
 
               {showBusLineResults && busLineResults.length > 0 && (
-                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded shadow-lg max-h-60 overflow-auto text-gray-800">
+                <div className="absolute z-20 mt-1 left-0 right-0 bg-[var(--concrete)] border-[3px] border-[var(--black)] max-h-60 overflow-auto">
                   {busLineResults.map(line => (
                     <div
                       key={line.id}
-                      className="px-3 py-2 hover:bg-blue-100 cursor-pointer border-b border-gray-100"
+                      className="px-4 py-3 hover:bg-[var(--mta-yellow)] cursor-pointer border-b-2 border-[var(--black)] last:border-b-0 transition-colors"
                       onClick={() => selectBusLine(line as BusLine)}
                     >
-                      <div className="font-bold">{line.shortName}</div>
-                      <div className="text-xs text-gray-600">{line.longName}</div>
+                      <div className="font-display text-lg">{line.shortName}</div>
+                      <div className="text-xs text-[var(--muted)]">{line.longName}</div>
                       {'distance' in line && (
-                        <div className="text-xs text-blue-600 mt-1">
+                        <div className="text-xs font-medium mt-1">
                           {((line as NearbyBusLine).distance < 0.1
-                            ? 'Very close'
-                            : `${(line as NearbyBusLine).distance.toFixed(1)} miles away`)}
+                            ? 'NEARBY'
+                            : `${(line as NearbyBusLine).distance.toFixed(1)} MI`)}
                         </div>
                       )}
                     </div>
@@ -1165,28 +1220,25 @@ const BusTrackerContent = () => {
             </div>
 
             {busStopError && (
-              <div className="bg-blue-700 border-l-4 border-yellow-400 text-white p-3 rounded mb-3">
-                <p className="text-sm">{busStopError}</p>
+              <div className="p-3 bg-[var(--mta-yellow)] text-[var(--black)] text-sm font-medium border-l-4 border-[var(--black)]">
+                {busStopError}
               </div>
             )}
 
+            {/* Direction Selector */}
             {busLineId && directions.length > 0 && (
-              <div className="mb-3 p-3 bg-blue-700 rounded">
-                <label className="text-sm mb-2 block font-semibold">
-                  ⚠️ Select Direction (Required)
-                </label>
+              <div>
+                <label className="font-display text-sm tracking-wide block mb-2">DIRECTION</label>
                 <select
                   value={selectedDirection}
                   onChange={(e) => {
                     const newDirection = e.target.value;
                     setSelectedDirection(newDirection);
-                    // Clear current selections as they might not exist in new direction
                     setOriginId('');
                     setDestinationId('');
-                    // Force update of stops list
                     triggerForceUpdate();
                   }}
-                  className="text-gray-800 rounded px-3 py-2 w-full font-medium"
+                  className="brutal-select w-full"
                 >
                   {directions.map((direction, index) => (
                     <option key={`dir-${direction.id}-${index}`} value={direction.id}>
@@ -1194,25 +1246,26 @@ const BusTrackerContent = () => {
                     </option>
                   ))}
                 </select>
-                <p className="text-xs mt-1 text-blue-200">
-                  {currentStops.length} stops available for this direction
+                <p className="text-xs text-[var(--muted)] mt-1 font-mono">
+                  {currentStops.length} STOPS
                 </p>
               </div>
             )}
 
-            <div className="flex space-x-2">
+            {/* Stop Selectors */}
+            <div className="flex gap-3 items-end">
               <div className="flex-1">
-                <label className="text-sm mb-1 block">Origin Stop</label>
+                <label className="font-display text-sm tracking-wide block mb-2">FROM</label>
                 <select
                   value={originId}
                   onChange={(e) => handleOriginChange(e.target.value)}
-                  className="text-gray-800 rounded px-2 py-1 w-full"
+                  className="brutal-select w-full text-sm"
                   disabled={!busLineId || !selectedDirection || currentStops.length === 0}
                 >
                   <option key="placeholder-origin" value="">
-                    {!selectedDirection ? "Select direction first" : 
-                     currentStops.length === 0 ? "No stops available" : 
-                     "Select origin stop"}
+                    {!selectedDirection ? "Select direction" :
+                     currentStops.length === 0 ? "No stops" :
+                     "Select stop"}
                   </option>
                   {currentStops.map((stop, index) => (
                     <option key={`origin-${stop.id}-${index}`} value={stop.id}>{stop.name}</option>
@@ -1220,30 +1273,30 @@ const BusTrackerContent = () => {
                 </select>
               </div>
 
-              <div className="flex items-end pb-1">
-                <button
-                  onClick={handleSwapDirections}
-                  className="bg-blue-700 rounded-full p-2 hover:bg-blue-800"
-                  aria-label="Switch direction"
-                  title={directions.length > 1 ? "Switch to opposite direction" : "Swap origin and destination"}
-                  disabled={!busLineId || !selectedDirection}
-                >
-                  ↔️
-                </button>
-              </div>
+              <button
+                onClick={handleSwapDirections}
+                className="brutal-button px-3 py-2 mb-[1px]"
+                aria-label="Switch direction"
+                title={directions.length > 1 ? "Switch to opposite direction" : "Swap origin and destination"}
+                disabled={!busLineId || !selectedDirection}
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="square" d="M8 7h12m0 0l-4-4m4 4l-4 4M16 17H4m0 0l4-4m-4 4l4 4" />
+                </svg>
+              </button>
 
               <div className="flex-1">
-                <label className="text-sm mb-1 block">Destination Stop</label>
+                <label className="font-display text-sm tracking-wide block mb-2">TO</label>
                 <select
                   value={destinationId}
                   onChange={(e) => handleDestinationChange(e.target.value)}
-                  className="text-gray-800 rounded px-2 py-1 w-full"
+                  className="brutal-select w-full text-sm"
                   disabled={!busLineId || !selectedDirection || currentStops.length === 0}
                 >
                   <option key="placeholder-destination" value="">
-                    {!selectedDirection ? "Select direction first" : 
-                     currentStops.length === 0 ? "No stops available" : 
-                     "Select destination stop"}
+                    {!selectedDirection ? "Select direction" :
+                     currentStops.length === 0 ? "No stops" :
+                     "Select stop"}
                   </option>
                   {currentStops.map((stop, index) => (
                     <option key={`dest-${stop.id}-${index}`} value={stop.id}>{stop.name}</option>
@@ -1253,107 +1306,124 @@ const BusTrackerContent = () => {
             </div>
 
             {stopsLoading && (
-              <div className="text-center py-2">
-                <div className="inline-block animate-spin h-4 w-4 border-2 border-white rounded-full border-t-transparent"></div>
-                <span className="ml-2 text-sm">Loading stops...</span>
+              <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
+                <div className="animate-spin h-4 w-4 border-2 border-[var(--black)] border-t-transparent"></div>
+                <span className="font-mono">LOADING...</span>
               </div>
             )}
-          </div>
-        )}
 
-        <div className="text-sm mt-3">
-          📍 {
-            data?.originName || 
-            getStopName(originId) ||
-            (stopsLoading && originId ? 'Loading origin...' : 
-             originId ? originId : 'Select Origin')
-          } → {
-            data?.destinationName || 
-            getStopName(destinationId) ||
-            (stopsLoading && destinationId ? 'Loading destination...' : 
-             destinationId ? destinationId : 'Select Destination')
-          }
-        </div>
-        <div className="mt-4 flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={enableCutoff}
-              onChange={handleCutoffChange}
-              className={`${enableCutoff ? 'bg-blue-700' : 'bg-blue-400'} relative inline-flex h-6 w-11 items-center rounded-full transition-colors`}
-            >
-              <span className={`${enableCutoff ? 'translate-x-6' : 'translate-x-1'} inline-block h-4 w-4 transform rounded-full bg-white transition-transform`} />
-            </Switch>
-            <span className="text-sm">Check arrival times</span>
-          </div>
-          <input
-            type="time"
-            value={cutoffTime}
-            onChange={(e) => handleCutoffTimeChange(e.target.value)}
-            className="bg-blue-400 rounded px-2 py-1 text-sm"
-            disabled={!enableCutoff}
-          />
-        </div>
-      </div>
-      <div className="p-6">
-        <div className="text-sm text-gray-500 mb-4 flex justify-between items-center">
-          <span>Last: {lastRefresh?.toLocaleTimeString() || 'Loading...'}</span>
-          <span>Refresh in {nextRefreshIn} secs</span>
-        </div>
-        {loading && <div className="text-center py-4">Loading arrival times...</div>}
-        {error && (
-          <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4">
-            <p>{error}</p>
-            <p className="text-sm mt-2">Try selecting different stops or a different bus line.</p>
+            {/* Cutoff Time */}
+            <div className="pt-3 border-t-2 border-[var(--black)] border-dashed">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={enableCutoff}
+                    onChange={handleCutoffChange}
+                    className={`${enableCutoff ? 'bg-[var(--mta-yellow)]' : 'bg-[var(--muted)]'} relative inline-flex h-6 w-11 items-center border-2 border-[var(--black)] transition-colors`}
+                  >
+                    <span className={`${enableCutoff ? 'translate-x-5' : 'translate-x-0'} inline-block h-5 w-5 transform bg-[var(--black)] transition-transform`} />
+                  </Switch>
+                  <span className="text-sm font-medium">ARRIVE BY</span>
+                </div>
+                <input
+                  type="time"
+                  value={cutoffTime}
+                  onChange={(e) => handleCutoffTimeChange(e.target.value)}
+                  className="brutal-input text-sm font-mono"
+                  disabled={!enableCutoff}
+                />
+              </div>
+            </div>
           </div>
         )}
-        {!loading && !error && arrivals.length === 0 && (
-          <div className="text-center py-4">No buses scheduled at this time</div>
-        )}
-        {!loading && !error && arrivals.length > 0 && (
-          <div className="space-y-4">
-            {arrivals.map((bus) => {
-              const destinationStatus = bus.destinationArrival ? getBusStatus(bus.destinationArrival) : 'normal';
-              return (
-                <div
-                  key={bus.vehicleId}
-                  className={`p-4 rounded-lg ${destinationStatus === 'late' ? 'bg-gray-50 border-l-4 border-red-500' :
-                    destinationStatus === 'warning' ? 'bg-gray-50 border-l-4 border-yellow-500' :
-                      'bg-gray-50 border-l-4 border-green-500'
-                    }`}
-                >
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center">
-                      <span className="mr-3 text-xl">🚌</span>
-                      <div>
-                        <span className="font-bold text-xl text-gray-800">{getMinutesUntil(bus.originArrival)}</span>
-                        <span className="text-gray-800 text-base ml-1">min</span>
-                        <span className="text-gray-500 text-base ml-3">({bus.stopsAway} {bus.stopsAway === 1 ? 'stop' : 'stops'} away)</span>
+      </header>
+
+      {/* Arrivals Section */}
+      <section className="brutal-card border-t-0 min-h-[200px]">
+        {/* Status Bar */}
+        <div className="px-6 py-3 border-b-[3px] border-[var(--black)] flex justify-between items-center text-xs font-mono text-[var(--muted)]">
+          <span>{lastRefresh?.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) || '...'}</span>
+          <span className={nextRefreshIn <= 5 ? 'animate-pulse-slow' : ''}>
+            {nextRefreshIn}s
+          </span>
+        </div>
+
+        <div className="p-6">
+          {loading && (
+            <div className="flex items-center justify-center py-12 gap-3">
+              <div className="animate-spin h-6 w-6 border-3 border-[var(--black)] border-t-transparent"></div>
+              <span className="font-mono text-sm">LOADING</span>
+            </div>
+          )}
+
+          {error && (
+            <div className="p-4 bg-[var(--danger)] text-white">
+              <p className="font-medium">{error}</p>
+              <p className="text-sm mt-2 opacity-80">Try different stops or route.</p>
+            </div>
+          )}
+
+          {!loading && !error && arrivals.length === 0 && (
+            <div className="py-12 text-center">
+              <div className="font-display text-4xl text-[var(--muted)]">NO BUSES</div>
+              <p className="text-sm text-[var(--muted)] mt-2">None scheduled at this time</p>
+            </div>
+          )}
+
+          {!loading && !error && arrivals.length > 0 && (
+            <div className="space-y-3 stagger-children">
+              {arrivals.map((bus) => {
+                const destinationStatus = bus.destinationArrival ? getBusStatus(bus.destinationArrival) : 'normal';
+                const statusClass = destinationStatus === 'late' ? 'status-bar--danger' :
+                  destinationStatus === 'warning' ? 'status-bar--warning' : 'status-bar--good';
+
+                return (
+                  <div
+                    key={bus.vehicleId}
+                    className="flex border-[3px] border-[var(--black)] bg-white overflow-hidden"
+                  >
+                    {/* Status Bar */}
+                    <div className={`status-bar ${statusClass}`}></div>
+
+                    {/* Content */}
+                    <div className="flex-1 p-4 flex items-center justify-between">
+                      <div className="flex items-baseline gap-1">
+                        <span className="font-display text-5xl leading-none">{getMinutesUntil(bus.originArrival)}</span>
+                        <span className="font-display text-xl text-[var(--muted)]">MIN</span>
+                      </div>
+
+                      <div className="text-right">
+                        <div className="text-xs font-mono text-[var(--muted)]">
+                          {bus.stopsAway} {bus.stopsAway === 1 ? 'STOP' : 'STOPS'}
+                        </div>
+                        <div className="font-mono text-lg font-semibold">
+                          {bus.isEstimated && <span className="text-[var(--muted)]">~</span>}
+                          {formatTime(bus.destinationArrival)}
+                        </div>
                       </div>
                     </div>
-                    <div className="flex-shrink-0 whitespace-nowrap text-right">
-                      <span className="text-gray-400 mr-2">→</span>
-                      <span className="text-gray-600 text-base">@ {bus.isEstimated ? <i>{formatTime(bus.destinationArrival)}</i> : formatTime(bus.destinationArrival)}</span>
-                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-      <div className="border-t border-gray-200 p-4 text-center">
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="mt-6 text-center">
         <a
           href="https://github.com/saadiq/bus-time"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-gray-400 hover:text-gray-600 text-sm"
-          title="View source on GitHub"
+          className="inline-flex items-center gap-2 text-[var(--muted)] hover:text-[var(--concrete)] text-xs font-mono transition-colors"
         >
-          <svg height="16" width="16" viewBox="0 0 16 16" className="fill-current">
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />          </svg>
-          <span>Source</span>
+          <svg height="14" width="14" viewBox="0 0 16 16" className="fill-current">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+          </svg>
+          SOURCE
         </a>
-      </div>
+      </footer>
     </div>
   );
 };
