@@ -1,26 +1,12 @@
 import React from 'react';
+import { useSettings } from '@/contexts/SettingsContext';
 
-interface RouteHeaderProps {
-  busLineSearch: string;
-  busLineId: string;
-  originName: string | null;
-  destinationName: string | null;
-  enableCutoff: boolean;
-  cutoffTime: string;
-  onSwapDirections: () => void;
-  onToggleSettings: () => void;
-}
+const RouteHeader = () => {
+  const {
+    busLineSearch, busLineId, originName, destinationName,
+    enableCutoff, cutoffTime, onSwapDirections, onToggleSettings,
+  } = useSettings();
 
-const RouteHeader = ({
-  busLineSearch,
-  busLineId,
-  originName,
-  destinationName,
-  enableCutoff,
-  cutoffTime,
-  onSwapDirections,
-  onToggleSettings,
-}: RouteHeaderProps) => {
   const lineName = busLineId ? busLineSearch.split(' - ')[0] : null;
 
   const formatCutoffTime = (time: string) => {

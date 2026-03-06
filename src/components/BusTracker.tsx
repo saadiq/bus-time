@@ -14,6 +14,7 @@ import { useStopManagement } from '@/hooks/useStopManagement';
 import { useArrivalsPolling } from '@/hooks/useArrivalsPolling';
 import { useBootstrap } from '@/hooks/useBootstrap';
 import safeLocalStorage from '@/lib/safeLocalStorage';
+import { SettingsProvider, SettingsContextValue } from '@/contexts/SettingsContext';
 import RouteHeader from './RouteHeader';
 import SettingsPanel from './SettingsPanel';
 import ArrivalsDisplay from './ArrivalsDisplay';
@@ -143,63 +144,50 @@ const BusTrackerContent = () => {
   const originName = data?.originName || getStopName(originId);
   const destinationName = data?.destinationName || getStopName(destinationId);
 
+  const settingsValue: SettingsContextValue = {
+    busLineSearch, busLineId, geoLoading, geoError,
+    showBusLineResults, busLineResults,
+    onSearchChange: handleBusLineSearchChange,
+    onInputFocus: handleInputFocus,
+    onGeolocation: handleGeolocation,
+    onSelectBusLine: selectBusLine,
+    onReset: handleReset,
+    busStopError, directions, selectedDirection, currentStops,
+    originId, destinationId, stopsLoading,
+    onDirectionChange: handleDirectionChange,
+    onOriginChange: handleOriginChange,
+    onDestinationChange: handleDestinationChange,
+    onSwapDirections: handleSwapDirections,
+    enableCutoff, cutoffTime,
+    onCutoffChange: handleCutoffChange,
+    onCutoffTimeChange: handleCutoffTimeChange,
+    isOpen: isConfigOpen,
+    onClose: () => setIsConfigOpen(false),
+    onToggleSettings: () => setIsConfigOpen(!isConfigOpen),
+    originName, destinationName,
+  };
+
   return (
-    <div className="max-w-xl mx-auto flex flex-col min-h-[calc(100vh-2rem)]">
-      <RouteHeader
-        busLineSearch={busLineSearch}
-        busLineId={busLineId}
-        originName={originName}
-        destinationName={destinationName}
-        enableCutoff={enableCutoff}
-        cutoffTime={cutoffTime}
-        onSwapDirections={handleSwapDirections}
-        onToggleSettings={() => setIsConfigOpen(!isConfigOpen)}
-      />
+    <SettingsProvider value={settingsValue}>
+      <div className="max-w-xl mx-auto flex flex-col min-h-[calc(100vh-2rem)]">
+        <RouteHeader />
 
-      <ArrivalsDisplay
-        loading={loading}
-        error={error}
-        arrivals={arrivals}
-        lastRefresh={lastRefresh}
-        nextRefreshIn={nextRefreshIn}
-        getBusStatus={getBusStatus}
-        formatTime={formatTime}
-        getMinutesUntil={getMinutesUntil}
-      />
+        <ArrivalsDisplay
+          loading={loading}
+          error={error}
+          arrivals={arrivals}
+          lastRefresh={lastRefresh}
+          nextRefreshIn={nextRefreshIn}
+          getBusStatus={getBusStatus}
+          formatTime={formatTime}
+          getMinutesUntil={getMinutesUntil}
+        />
 
-      <Footer />
+        <Footer />
 
-      <SettingsPanel
-        isOpen={isConfigOpen}
-        onClose={() => setIsConfigOpen(false)}
-        busLineSearch={busLineSearch}
-        busLineId={busLineId}
-        geoLoading={geoLoading}
-        geoError={geoError}
-        showBusLineResults={showBusLineResults}
-        busLineResults={busLineResults}
-        busStopError={busStopError}
-        directions={directions}
-        selectedDirection={selectedDirection}
-        currentStops={currentStops}
-        originId={originId}
-        destinationId={destinationId}
-        stopsLoading={stopsLoading}
-        enableCutoff={enableCutoff}
-        cutoffTime={cutoffTime}
-        onSearchChange={handleBusLineSearchChange}
-        onInputFocus={handleInputFocus}
-        onGeolocation={handleGeolocation}
-        onSelectBusLine={selectBusLine}
-        onReset={handleReset}
-        onDirectionChange={handleDirectionChange}
-        onOriginChange={handleOriginChange}
-        onDestinationChange={handleDestinationChange}
-        onSwapDirections={handleSwapDirections}
-        onCutoffChange={handleCutoffChange}
-        onCutoffTimeChange={handleCutoffTimeChange}
-      />
-    </div>
+        <SettingsPanel />
+      </div>
+    </SettingsProvider>
   );
 };
 
