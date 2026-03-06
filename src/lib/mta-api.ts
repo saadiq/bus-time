@@ -12,12 +12,41 @@ export interface StopInfoResult {
   direction: string;
 }
 
+// --- In-memory cache for stop info (30-minute TTL) ---
+
+interface CacheEntry {
+  data: StopInfoResult;
+  expiresAt: number;
+}
+
+const STOP_INFO_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const stopInfoCache = new Map<string, CacheEntry>();
+
+function getCachedStopInfo(stopId: string): StopInfoResult | null {
+  const entry = stopInfoCache.get(stopId);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    stopInfoCache.delete(stopId);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCachedStopInfo(stopId: string, data: StopInfoResult): void {
+  stopInfoCache.set(stopId, { data, expiresAt: Date.now() + STOP_INFO_TTL_MS });
+}
+
 /**
- * Fetch stop information directly from MTA API
+ * Fetch stop information directly from MTA API.
+ * Results are cached in-memory for 30 minutes since stop names rarely change.
  * @param stopId - The MTA stop ID (e.g., "MTA_304213")
  * @returns Stop info or null if not found
  */
 export async function fetchStopInfo(stopId: string): Promise<StopInfoResult | null> {
+  // Check cache first
+  const cached = getCachedStopInfo(stopId);
+  if (cached) return cached;
+
   const apiKey = process.env.MTA_API_KEY;
   if (!apiKey) {
     console.error('MTA_API_KEY environment variable is not set');
@@ -49,13 +78,18 @@ export async function fetchStopInfo(stopId: string): Promise<StopInfoResult | nu
     }
 
     const entry = data.data;
-    return {
+    const result: StopInfoResult = {
       name: entry.name || 'Unknown Stop',
       id: entry.id || stopId,
       lat: entry.lat || 0,
       lon: entry.lon || 0,
       direction: entry.direction || '',
     };
+
+    // Store in cache
+    setCachedStopInfo(stopId, result);
+
+    return result;
   } catch (error) {
     console.error(`Error fetching stop info for ${stopId}:`, error);
     return null;
