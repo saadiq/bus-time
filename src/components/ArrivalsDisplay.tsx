@@ -15,7 +15,7 @@ interface ArrivalsDisplayProps {
 const statusConfig = {
   late: { label: 'LATE', color: 'text-[var(--status-danger)]', border: 'status-bar--danger' },
   warning: { label: 'CUTTING IT CLOSE', color: 'text-[var(--status-warning)]', border: 'status-bar--warning' },
-  normal: { label: 'ON TIME', color: 'text-[var(--status-good)]', border: 'status-bar--good' },
+  normal: { label: '', color: 'text-[var(--status-good)]', border: 'status-bar--good' },
 };
 
 const ArrivalsDisplay = ({
