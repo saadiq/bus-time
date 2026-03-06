@@ -58,7 +58,7 @@ export function useBootstrap(params: UseBootstrapParams) {
           setBusLineId(urlBusLine);
           await fetchBusLineDetails(urlBusLine);
           await fetchStopsForLine(urlBusLine, urlOriginId || undefined, urlDestinationId || undefined);
-          setIsConfigOpen(true);
+          setIsConfigOpen(!(urlOriginId && urlDestinationId));
           return;
         }
 
@@ -71,6 +71,7 @@ export function useBootstrap(params: UseBootstrapParams) {
           setBusLineId(storedBusLine);
           setBusLineSearch(storedBusLineSearch || storedBusLine);
           await fetchStopsForLine(storedBusLine, storedOriginId, storedDestinationId);
+          setIsConfigOpen(false);
           syncUrl({
             busLineId: storedBusLine,
             originId: storedOriginId,

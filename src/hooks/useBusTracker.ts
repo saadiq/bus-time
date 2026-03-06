@@ -82,12 +82,12 @@ export const initialState: BusTrackerState = {
   destinationId: '',
   selectedDirection: '',
   cutoffTime: '08:00',
-  enableCutoff: false,
+  enableCutoff: true,
   loading: true,
   busLineLoading: false,
   stopsLoading: false,
   geoLoading: false,
-  isConfigOpen: true, // Start with config open by default
+  isConfigOpen: false, // Dashboard-first: start closed
   showBusLineResults: false,
   error: null,
   busStopError: null,

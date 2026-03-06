@@ -14,7 +14,8 @@ import { useStopManagement } from '@/hooks/useStopManagement';
 import { useArrivalsPolling } from '@/hooks/useArrivalsPolling';
 import { useBootstrap } from '@/hooks/useBootstrap';
 import safeLocalStorage from '@/lib/safeLocalStorage';
-import ConfigPanel from './ConfigPanel';
+import RouteHeader from './RouteHeader';
+import SettingsPanel from './SettingsPanel';
 import ArrivalsDisplay from './ArrivalsDisplay';
 import Footer from './Footer';
 
@@ -139,65 +140,21 @@ const BusTrackerContent = () => {
     triggerForceUpdate();
   };
 
+  const originName = data?.originName || getStopName(originId);
+  const destinationName = data?.destinationName || getStopName(destinationId);
+
   return (
-    <div className="max-w-xl mx-auto">
-      <header className="brutal-card border-b-0">
-        <div className="p-6 pb-4">
-          <div className="flex items-baseline justify-between">
-            <h1 className="font-display text-4xl md:text-5xl tracking-tight">
-              {busLineId ? busLineSearch.split(' - ')[0] : 'BUS'}
-            </h1>
-            <button
-              onClick={() => setIsConfigOpen(!isConfigOpen)}
-              className="brutal-button brutal-button--ghost text-sm border-2"
-            >
-              {isConfigOpen ? 'CLOSE' : 'CONFIG'}
-            </button>
-          </div>
-
-          <div className="mt-4 flex items-center gap-3 text-sm font-medium">
-            <span className="w-3 h-3 bg-[var(--mta-yellow)]"></span>
-            <span className="truncate">
-              {data?.originName || getStopName(originId) || (stopsLoading && originId ? '...' : 'SELECT ORIGIN')}
-            </span>
-            <span className="text-[var(--muted)]">&rarr;</span>
-            <span className="truncate">
-              {data?.destinationName || getStopName(destinationId) || (stopsLoading && destinationId ? '...' : 'SELECT DESTINATION')}
-            </span>
-          </div>
-        </div>
-
-        {isConfigOpen && (
-          <ConfigPanel
-            busLineSearch={busLineSearch}
-            busLineId={busLineId}
-            geoLoading={geoLoading}
-            geoError={geoError}
-            showBusLineResults={showBusLineResults}
-            busLineResults={busLineResults}
-            busStopError={busStopError}
-            directions={directions}
-            selectedDirection={selectedDirection}
-            currentStops={currentStops}
-            originId={originId}
-            destinationId={destinationId}
-            stopsLoading={stopsLoading}
-            enableCutoff={enableCutoff}
-            cutoffTime={cutoffTime}
-            onSearchChange={handleBusLineSearchChange}
-            onInputFocus={handleInputFocus}
-            onGeolocation={handleGeolocation}
-            onSelectBusLine={selectBusLine}
-            onReset={handleReset}
-            onDirectionChange={handleDirectionChange}
-            onOriginChange={handleOriginChange}
-            onDestinationChange={handleDestinationChange}
-            onSwapDirections={handleSwapDirections}
-            onCutoffChange={handleCutoffChange}
-            onCutoffTimeChange={handleCutoffTimeChange}
-          />
-        )}
-      </header>
+    <div className="max-w-xl mx-auto flex flex-col min-h-[calc(100vh-2rem)]">
+      <RouteHeader
+        busLineSearch={busLineSearch}
+        busLineId={busLineId}
+        originName={originName}
+        destinationName={destinationName}
+        enableCutoff={enableCutoff}
+        cutoffTime={cutoffTime}
+        onSwapDirections={handleSwapDirections}
+        onToggleSettings={() => setIsConfigOpen(!isConfigOpen)}
+      />
 
       <ArrivalsDisplay
         loading={loading}
@@ -211,13 +168,44 @@ const BusTrackerContent = () => {
       />
 
       <Footer />
+
+      <SettingsPanel
+        isOpen={isConfigOpen}
+        onClose={() => setIsConfigOpen(false)}
+        busLineSearch={busLineSearch}
+        busLineId={busLineId}
+        geoLoading={geoLoading}
+        geoError={geoError}
+        showBusLineResults={showBusLineResults}
+        busLineResults={busLineResults}
+        busStopError={busStopError}
+        directions={directions}
+        selectedDirection={selectedDirection}
+        currentStops={currentStops}
+        originId={originId}
+        destinationId={destinationId}
+        stopsLoading={stopsLoading}
+        enableCutoff={enableCutoff}
+        cutoffTime={cutoffTime}
+        onSearchChange={handleBusLineSearchChange}
+        onInputFocus={handleInputFocus}
+        onGeolocation={handleGeolocation}
+        onSelectBusLine={selectBusLine}
+        onReset={handleReset}
+        onDirectionChange={handleDirectionChange}
+        onOriginChange={handleOriginChange}
+        onDestinationChange={handleDestinationChange}
+        onSwapDirections={handleSwapDirections}
+        onCutoffChange={handleCutoffChange}
+        onCutoffTimeChange={handleCutoffTimeChange}
+      />
     </div>
   );
 };
 
 const BusTracker = () => {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen text-[var(--text-muted)]">Loading...</div>}>
       <BusTrackerContent />
     </Suspense>
   );
