@@ -37,6 +37,14 @@ export function useBusLineSearch(params: UseBusLineSearchParams) {
   const searchAbortControllerRef = useRef<AbortController | null>(null);
   const findMatchingStop = useStopMatching();
 
+  const getFallbackName = (lineId: string) => {
+    if (lineId.includes('_')) {
+      const parts = lineId.split('_');
+      if (parts.length >= 2) return parts[parts.length - 1];
+    }
+    return lineId;
+  };
+
   const searchBusLines = async (searchQuery: string) => {
     if (searchAbortControllerRef.current) {
       searchAbortControllerRef.current.abort();
@@ -94,17 +102,9 @@ export function useBusLineSearch(params: UseBusLineSearchParams) {
   };
 
   const fetchBusLineDetails = async (lineId: string): Promise<void> => {
+    const fallbackName = getFallbackName(lineId);
     try {
       setBusLineLoading(true);
-      let fallbackName = lineId;
-
-      if (lineId.includes('_')) {
-        const parts = lineId.split('_');
-        if (parts.length >= 2) {
-          const routeId = parts[parts.length - 1];
-          fallbackName = `${routeId}`;
-        }
-      }
 
       const response = await fetch(`/api/bus-lines/info?lineId=${encodeURIComponent(lineId)}`);
       if (!response.ok) {
@@ -119,22 +119,11 @@ export function useBusLineSearch(params: UseBusLineSearchParams) {
       if (data.busLine) {
         setBusLineSearch(`${data.busLine.shortName} - ${extractRouteName(data.busLine.longName)}`);
       } else {
-        console.warn('Bus line info API returned no data:', data);
         setBusLineSearch(`Bus ${fallbackName}`);
       }
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return;
-      }
+      if (err instanceof Error && err.name === 'AbortError') return;
       console.error('Error fetching bus line details:', err);
-      let fallbackName = lineId;
-      if (lineId.includes('_')) {
-        const parts = lineId.split('_');
-        if (parts.length >= 2) {
-          const routeId = parts[parts.length - 1];
-          fallbackName = routeId;
-        }
-      }
       setBusLineSearch(`Bus ${fallbackName}`);
     } finally {
       setBusLineLoading(false);
@@ -276,23 +265,15 @@ export function useBusLineSearch(params: UseBusLineSearchParams) {
         setGeoError('No bus lines found nearby');
       }
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
       console.error('Geolocation error:', err);
       if (err instanceof GeolocationPositionError) {
-        switch (err.code) {
-          case err.PERMISSION_DENIED:
-            setGeoError('Please allow location access to find nearby buses');
-            break;
-          case err.POSITION_UNAVAILABLE:
-            setGeoError('Unable to determine your location');
-            break;
-          case err.TIMEOUT:
-            setGeoError('Location request timed out');
-            break;
-          default:
-            setGeoError('Error getting location');
-        }
-      } else if (err instanceof Error && err.name === 'AbortError') {
-        return;
+        const messages: Record<number, string> = {
+          [GeolocationPositionError.PERMISSION_DENIED]: 'Please allow location access to find nearby buses',
+          [GeolocationPositionError.POSITION_UNAVAILABLE]: 'Unable to determine your location',
+          [GeolocationPositionError.TIMEOUT]: 'Location request timed out',
+        };
+        setGeoError(messages[err.code] || 'Error getting location');
       } else {
         setGeoError('Error finding nearby bus lines');
       }

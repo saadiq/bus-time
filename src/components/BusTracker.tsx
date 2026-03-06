@@ -86,7 +86,6 @@ const BusTrackerContent = () => {
 
   useBootstrap({
     busLineId, busLineSearch, originId, destinationId, stops,
-    enableCutoff, cutoffTime,
     setBusLineId, setBusLineSearch, setOriginId, setDestinationId,
     setStops, setIsConfigOpen, setLastRefresh, setEnableCutoff, setCutoffTime,
     syncUrl, fetchBusLineDetails, fetchStopsForLine,

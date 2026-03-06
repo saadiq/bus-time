@@ -20,6 +20,7 @@ interface CacheEntry {
 }
 
 const STOP_INFO_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const STOP_INFO_CACHE_MAX = 500;
 const stopInfoCache = new Map<string, CacheEntry>();
 
 function getCachedStopInfo(stopId: string): StopInfoResult | null {
@@ -33,6 +34,10 @@ function getCachedStopInfo(stopId: string): StopInfoResult | null {
 }
 
 function setCachedStopInfo(stopId: string, data: StopInfoResult): void {
+  if (stopInfoCache.size >= STOP_INFO_CACHE_MAX) {
+    const firstKey = stopInfoCache.keys().next().value;
+    if (firstKey) stopInfoCache.delete(firstKey);
+  }
   stopInfoCache.set(stopId, { data, expiresAt: Date.now() + STOP_INFO_TTL_MS });
 }
 

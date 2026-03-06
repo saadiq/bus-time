@@ -9,8 +9,6 @@ interface UseBootstrapParams {
   originId: string;
   destinationId: string;
   stops: BusStop[];
-  enableCutoff: boolean;
-  cutoffTime: string;
   setBusLineId: (v: string) => void;
   setBusLineSearch: (v: string) => void;
   setOriginId: (v: string) => void;

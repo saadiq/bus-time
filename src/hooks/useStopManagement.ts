@@ -35,9 +35,11 @@ export function useStopManagement(params: UseStopManagementParams) {
   } = params;
 
   const stopsAbortControllerRef = useRef<AbortController | null>(null);
+  const busLineSearchRef = useRef(busLineSearch);
+  busLineSearchRef.current = busLineSearch;
 
   const fetchStopsForLine = useCallback(async (lineId: string, preserveOriginId?: string, preserveDestinationId?: string): Promise<void> => {
-    const currentBusLineSearch = busLineSearch;
+    const currentBusLineSearch = busLineSearchRef.current;
 
     if (!lineId) {
       setStopsLoading(false);
@@ -178,7 +180,7 @@ export function useStopManagement(params: UseStopManagementParams) {
       }
       setStopsLoading(false);
     }
-  }, [syncUrl, busLineSearch, batchUpdate, setBusStopError, setStops, setDirections, setSelectedDirection, setOriginId, setDestinationId, setStopsLoading, setBusLineSearch]);
+  }, [syncUrl, batchUpdate, setBusStopError, setStops, setDirections, setSelectedDirection, setOriginId, setDestinationId, setStopsLoading, setBusLineSearch]);
 
   const handleSwapDirections = () => {
     if (directions.length > 1) {
@@ -254,101 +256,67 @@ export function useStopManagement(params: UseStopManagementParams) {
     }
   };
 
-  const handleOriginChange = (newOriginId: string) => {
-    if (!destinationId) {
-      setOriginId(newOriginId);
-      syncUrl({ originId: newOriginId, destinationId });
+  const handleStopChange = (
+    changedId: string,
+    otherId: string,
+    isOrigin: boolean
+  ) => {
+    const setChanged = isOrigin ? setOriginId : setDestinationId;
+    const urlUpdate = isOrigin
+      ? { originId: changedId, destinationId: otherId }
+      : { originId: otherId, destinationId: changedId };
+
+    if (!otherId) {
+      setChanged(changedId);
+      syncUrl(urlUpdate);
       return;
     }
 
     const direction = directions.find(d => d.id === selectedDirection);
     if (!direction) return;
 
-    const newOriginStop = stops.find(s => s.id === newOriginId && s.direction === direction.name);
-    const currentDestStop = stops.find(s => s.id === destinationId && s.direction === direction.name);
+    const changedStop = stops.find(s => s.id === changedId && s.direction === direction.name);
+    const otherStop = stops.find(s => s.id === otherId && s.direction === direction.name);
+    if (!changedStop || !otherStop) return;
 
-    if (!newOriginStop || !currentDestStop) return;
+    const needsSwap = isOrigin
+      ? changedStop.sequence > otherStop.sequence
+      : changedStop.sequence < otherStop.sequence;
 
-    if (newOriginStop.sequence > currentDestStop.sequence && directions.length > 1) {
+    if (needsSwap && directions.length > 1) {
       const currentDirIndex = directions.findIndex(d => d.id === selectedDirection);
-      const newDirIndex = (currentDirIndex + 1) % directions.length;
-      const newDir = directions[newDirIndex];
+      const newDir = directions[(currentDirIndex + 1) % directions.length];
+      const newDirStops = stops.filter(s => s.direction === newDir.name);
 
-      const newDirectionStops = stops.filter(s => s.direction === newDir.name);
-
-      const originInNewDir = newDirectionStops.find(s =>
-        calculateDistance(s.lat, s.lon, newOriginStop.lat, newOriginStop.lon) < SAME_LOCATION_THRESHOLD
+      const changedInNewDir = newDirStops.find(s =>
+        calculateDistance(s.lat, s.lon, changedStop.lat, changedStop.lon) < SAME_LOCATION_THRESHOLD
       );
-      const destInNewDir = newDirectionStops.find(s =>
-        calculateDistance(s.lat, s.lon, currentDestStop.lat, currentDestStop.lon) < SAME_LOCATION_THRESHOLD
+      const otherInNewDir = newDirStops.find(s =>
+        calculateDistance(s.lat, s.lon, otherStop.lat, otherStop.lon) < SAME_LOCATION_THRESHOLD
       );
 
-      if (originInNewDir && destInNewDir) {
+      if (changedInNewDir && otherInNewDir) {
         setSelectedDirection(newDir.id);
-        setOriginId(originInNewDir.id);
-        setDestinationId(destInNewDir.id);
+        setOriginId(isOrigin ? changedInNewDir.id : otherInNewDir.id);
+        setDestinationId(isOrigin ? otherInNewDir.id : changedInNewDir.id);
         triggerForceUpdate();
         syncUrl({
-          originId: originInNewDir.id,
-          destinationId: destInNewDir.id,
+          originId: isOrigin ? changedInNewDir.id : otherInNewDir.id,
+          destinationId: isOrigin ? otherInNewDir.id : changedInNewDir.id,
         });
-      } else {
-        setOriginId(newOriginId);
-        syncUrl({ originId: newOriginId, destinationId });
+        return;
       }
-    } else {
-      setOriginId(newOriginId);
-      syncUrl({ originId: newOriginId, destinationId });
     }
+
+    setChanged(changedId);
+    syncUrl(urlUpdate);
   };
 
-  const handleDestinationChange = (newDestinationId: string) => {
-    if (!originId) {
-      setDestinationId(newDestinationId);
-      syncUrl({ originId, destinationId: newDestinationId });
-      return;
-    }
+  const handleOriginChange = (newOriginId: string) =>
+    handleStopChange(newOriginId, destinationId, true);
 
-    const direction = directions.find(d => d.id === selectedDirection);
-    if (!direction) return;
-
-    const currentOriginStop = stops.find(s => s.id === originId && s.direction === direction.name);
-    const newDestStop = stops.find(s => s.id === newDestinationId && s.direction === direction.name);
-
-    if (!currentOriginStop || !newDestStop) return;
-
-    if (newDestStop.sequence < currentOriginStop.sequence && directions.length > 1) {
-      const currentDirIndex = directions.findIndex(d => d.id === selectedDirection);
-      const newDirIndex = (currentDirIndex + 1) % directions.length;
-      const newDir = directions[newDirIndex];
-
-      const newDirectionStops = stops.filter(s => s.direction === newDir.name);
-
-      const originInNewDir = newDirectionStops.find(s =>
-        calculateDistance(s.lat, s.lon, currentOriginStop.lat, currentOriginStop.lon) < SAME_LOCATION_THRESHOLD
-      );
-      const destInNewDir = newDirectionStops.find(s =>
-        calculateDistance(s.lat, s.lon, newDestStop.lat, newDestStop.lon) < SAME_LOCATION_THRESHOLD
-      );
-
-      if (originInNewDir && destInNewDir) {
-        setSelectedDirection(newDir.id);
-        setOriginId(originInNewDir.id);
-        setDestinationId(destInNewDir.id);
-        triggerForceUpdate();
-        syncUrl({
-          originId: originInNewDir.id,
-          destinationId: destInNewDir.id,
-        });
-      } else {
-        setDestinationId(newDestinationId);
-        syncUrl({ originId, destinationId: newDestinationId });
-      }
-    } else {
-      setDestinationId(newDestinationId);
-      syncUrl({ originId, destinationId: newDestinationId });
-    }
-  };
+  const handleDestinationChange = (newDestinationId: string) =>
+    handleStopChange(newDestinationId, originId, false);
 
   const cleanup = () => {
     if (stopsAbortControllerRef.current) {

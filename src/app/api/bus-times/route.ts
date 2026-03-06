@@ -94,15 +94,6 @@ export async function GET(request: NextRequest) {
     const data = (await response.json()) as SiriResponse;
     const { buses } = parseSiriResponse(data, busLine, destinationId);
 
-    if (buses.length === 0 && !data.Siri?.ServiceDelivery?.StopMonitoringDelivery?.[0]?.MonitoredStopVisit) {
-      return NextResponse.json({
-        originName,
-        destinationName,
-        buses: [],
-        hasError: false,
-      });
-    }
-
     const busData: BusData = {
       originName,
       destinationName,
