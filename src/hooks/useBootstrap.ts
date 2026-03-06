@@ -8,6 +8,8 @@ interface UseBootstrapParams {
   busLineSearch: string;
   originId: string;
   destinationId: string;
+  enableCutoff: boolean;
+  cutoffTime: string;
   stops: BusStop[];
   setBusLineId: (v: string) => void;
   setBusLineSearch: (v: string) => void;
@@ -27,7 +29,7 @@ interface UseBootstrapParams {
 
 export function useBootstrap(params: UseBootstrapParams) {
   const {
-    busLineId, busLineSearch, originId, destinationId, stops,
+    busLineId, busLineSearch, originId, destinationId, enableCutoff, cutoffTime, stops,
     setBusLineId, setBusLineSearch, setOriginId, setDestinationId,
     setStops, setIsConfigOpen, setLastRefresh, setEnableCutoff, setCutoffTime,
     syncUrl, fetchBusLineDetails, fetchStopsForLine,
@@ -36,6 +38,7 @@ export function useBootstrap(params: UseBootstrapParams) {
 
   const query = useSearchParams();
   const currentBusLineRef = useRef({ id: '', search: '' });
+  const cutoffHydrated = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -123,8 +126,24 @@ export function useBootstrap(params: UseBootstrapParams) {
     if (urlCutoff === 'true') {
       setEnableCutoff(true);
       if (urlTime) setCutoffTime(urlTime);
+    } else if (!urlCutoff) {
+      const storedEnableCutoff = safeLocalStorage.getItem('enableCutoff');
+      if (storedEnableCutoff === 'true') {
+        setEnableCutoff(true);
+        const storedCutoffTime = safeLocalStorage.getItem('cutoffTime');
+        if (storedCutoffTime) setCutoffTime(storedCutoffTime);
+      }
     }
+    cutoffHydrated.current = true;
   }, [query, setEnableCutoff, setCutoffTime]);
+
+  useEffect(() => {
+    if (!cutoffHydrated.current) return;
+    safeLocalStorage.setItem('enableCutoff', String(enableCutoff));
+    if (enableCutoff) {
+      safeLocalStorage.setItem('cutoffTime', cutoffTime);
+    }
+  }, [enableCutoff, cutoffTime]);
 
   useEffect(() => {
     if (busLineId && busLineSearch) {

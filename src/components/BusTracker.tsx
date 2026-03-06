@@ -87,7 +87,7 @@ const BusTrackerContent = () => {
   });
 
   useBootstrap({
-    busLineId, busLineSearch, originId, destinationId, stops,
+    busLineId, busLineSearch, originId, destinationId, enableCutoff, cutoffTime, stops,
     setBusLineId, setBusLineSearch, setOriginId, setDestinationId,
     setStops, setIsConfigOpen, setLastRefresh, setEnableCutoff, setCutoffTime,
     syncUrl, fetchBusLineDetails, fetchStopsForLine,
@@ -99,6 +99,8 @@ const BusTrackerContent = () => {
     safeLocalStorage.removeItem('busLineSearch');
     safeLocalStorage.removeItem('originId');
     safeLocalStorage.removeItem('destinationId');
+    safeLocalStorage.removeItem('enableCutoff');
+    safeLocalStorage.removeItem('cutoffTime');
 
     syncUrl({
       busLineId: null,
