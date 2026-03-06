@@ -82,7 +82,7 @@ export const initialState: BusTrackerState = {
   destinationId: '',
   selectedDirection: '',
   cutoffTime: '08:00',
-  enableCutoff: true,
+  enableCutoff: false,
   loading: true,
   busLineLoading: false,
   stopsLoading: false,
