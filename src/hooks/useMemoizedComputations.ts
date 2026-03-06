@@ -3,16 +3,6 @@ import { BusStop, Direction } from '@/types';
 import { calculateDistance } from '@/lib/geo';
 import { getStopFilterForRoute } from '@/lib/routeConfig';
 
-// Memoized wrapper for shared distance calculation
-export const useDistanceCalculation = () => {
-  // Return stable reference to shared function
-  return useCallback(
-    (lat1: number, lon1: number, lat2: number, lon2: number) =>
-      calculateDistance(lat1, lon1, lat2, lon2),
-    []
-  );
-};
-
 // Memoized stop normalization for matching
 export const useStopNormalization = () => {
   return useCallback((name: string): string[] => {
@@ -56,88 +46,47 @@ export const useDirectionStops = (
   return useMemo(() => {
     const direction = directions.find(d => d.id === selectedDirection);
 
-    // Simple sorting function that uses the API-provided sequence numbers
-    const sortStopsBySequence = (stops: BusStop[]) => {
-      return [...stops].sort((a, b) => a.sequence - b.sequence);
+    const sortStopsBySequence = (stopsToSort: BusStop[]) => {
+      return [...stopsToSort].sort((a, b) => a.sequence - b.sequence);
+    };
+
+    const groupAndSortByDirection = (stopsToGroup: BusStop[]) => {
+      const groups: Record<string, BusStop[]> = {};
+      stopsToGroup.forEach(stop => {
+        if (!groups[stop.direction]) groups[stop.direction] = [];
+        groups[stop.direction].push(stop);
+      });
+      return Object.values(groups).flatMap(dirStops => sortStopsBySequence(dirStops));
     };
 
     if (!direction) {
-      // If there are no directions at all, return all stops sorted by sequence
       if (directions.length === 0) {
-        // First group by direction, then sort each group by sequence
-        const directionGroups: Record<string, BusStop[]> = {};
-        stops.forEach(stop => {
-          if (!directionGroups[stop.direction]) {
-            directionGroups[stop.direction] = [];
-          }
-          directionGroups[stop.direction].push(stop);
-        });
-
-        // Sort each direction group by sequence
-        const allSortedStops: BusStop[] = [];
-        Object.values(directionGroups).forEach(dirStops => {
-          allSortedStops.push(...sortStopsBySequence(dirStops));
-        });
-
-        return allSortedStops;
+        return groupAndSortByDirection(stops);
       }
-
-      // If we have directions but selected one is not found,
-      // use the first direction instead
       if (directions.length > 0) {
-        const firstDirection = directions[0];
-        const filteredStops = stops.filter(s => s.direction === firstDirection.name);
-        const sortedStops = sortStopsBySequence(filteredStops);
-
-        return sortedStops;
+        return sortStopsBySequence(stops.filter(s => s.direction === directions[0].name));
       }
-
       return [];
     }
 
     const filteredStops = stops.filter(stop => stop.direction === direction.name);
 
     if (filteredStops.length === 0) {
-      // If no stops match the exact direction name, try a more flexible approach
       const allDirectionNames = [...new Set(stops.map(s => s.direction))];
-
-      // Try to find a direction name that contains our direction name or vice versa
       const similarDirection = allDirectionNames.find(
         dirName => dirName.includes(direction.name) || direction.name.includes(dirName)
       );
 
       if (similarDirection) {
-        const similarStops = stops.filter(s => s.direction === similarDirection);
-        const sortedStops = sortStopsBySequence(similarStops);
-
-        return sortedStops;
+        return sortStopsBySequence(stops.filter(s => s.direction === similarDirection));
       }
 
-      // If still no stops found, group by direction and sort each group
       if (stops.length > 0) {
-        // Group by direction first
-        const directionGroups: Record<string, BusStop[]> = {};
-        stops.forEach(stop => {
-          if (!directionGroups[stop.direction]) {
-            directionGroups[stop.direction] = [];
-          }
-          directionGroups[stop.direction].push(stop);
-        });
-
-        // Sort each direction group by sequence
-        const allSortedStops: BusStop[] = [];
-        Object.values(directionGroups).forEach(dirStops => {
-          allSortedStops.push(...sortStopsBySequence(dirStops));
-        });
-
-        return allSortedStops;
+        return groupAndSortByDirection(stops);
       }
     }
 
-    // Sort the filtered stops by sequence
-    const sortedStops = sortStopsBySequence(filteredStops);
-
-    return sortedStops;
+    return sortStopsBySequence(filteredStops);
   }, [stops, directions, selectedDirection]);
 };
 
@@ -182,7 +131,6 @@ export const useTimeFormatting = () => {
 // Memoized stop matching for nearby bus lines
 export const useStopMatching = () => {
   const normalizeStops = useStopNormalization();
-  const distanceCalc = useDistanceCalculation();
 
   return useCallback((
     stops: BusStop[],
@@ -192,54 +140,33 @@ export const useStopMatching = () => {
     busLineId: string
   ) => {
     const targetStreets = normalizeStops(targetStopName);
-
-    // Get route-specific stop filter from configuration
     const stopFilter = getStopFilterForRoute(busLineId);
 
-    let matchingStop = null;
-    let matchFound = false;
+    let matchingStop: BusStop | null = null;
 
     for (const stop of stops) {
-      // Apply route-specific filtering if configured
-      if (stopFilter && !stopFilter(stop)) {
-        continue;
-      }
+      if (stopFilter && !stopFilter(stop)) continue;
 
       const currentStreets = normalizeStops(stop.name);
-
-      // Check if both streets match in either order
       const streetsMatch =
         (targetStreets[0] === currentStreets[0] && targetStreets[1] === currentStreets[1]) ||
         (targetStreets[0] === currentStreets[1] && targetStreets[1] === currentStreets[0]);
 
       if (streetsMatch) {
         matchingStop = stop;
-        matchFound = true;
         break;
       }
     }
 
-    if (!matchFound && stops.length > 0) {
-      // Filter stops based on route config for distance fallback
+    if (!matchingStop && stops.length > 0) {
       const eligibleStops = stopFilter ? stops.filter(stopFilter) : stops;
 
       if (eligibleStops.length > 0) {
-        // Find closest stop by distance
         let closestStop = eligibleStops[0];
-        let minDistance = distanceCalc(
-          userLat,
-          userLon,
-          closestStop.lat,
-          closestStop.lon
-        );
+        let minDistance = calculateDistance(userLat, userLon, closestStop.lat, closestStop.lon);
 
         for (const stop of eligibleStops) {
-          const distance = distanceCalc(
-            userLat,
-            userLon,
-            stop.lat,
-            stop.lon
-          );
+          const distance = calculateDistance(userLat, userLon, stop.lat, stop.lon);
           if (distance < minDistance) {
             minDistance = distance;
             closestStop = stop;
@@ -247,11 +174,10 @@ export const useStopMatching = () => {
         }
         matchingStop = closestStop;
       } else if (stops.length > 0) {
-        // Fallback to first stop if no eligible stops
         matchingStop = stops[0];
       }
     }
 
     return matchingStop;
-  }, [normalizeStops, distanceCalc]);
+  }, [normalizeStops]);
 };
