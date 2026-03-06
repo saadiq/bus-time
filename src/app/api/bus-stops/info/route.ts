@@ -57,7 +57,6 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
-      const _errorText = await response.text();
       return NextResponse.json(
         { error: `Failed to fetch stop: ${response.status}` },
         { status: response.status }

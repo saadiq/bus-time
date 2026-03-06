@@ -2,15 +2,7 @@ import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 import { validateCoordinates, ValidationError, isRateLimited, getClientId } from '@/lib/validation';
 import { calculateDistance } from '@/lib/geo';
-import { NearbyBusLine, ApiResponse } from '@/types';
-
-interface MTARoute {
-  id: string;
-  shortName: string;
-  longName: string;
-  description: string;
-  agencyId: string;
-}
+import { BusLine, NearbyBusLine, ApiResponse } from '@/types';
 
 // Rate limiting storage
 const requestMap = new Map<string, number[]>();
@@ -73,7 +65,7 @@ export async function GET(request: NextRequest) {
     const stopsData = await stopsResponse.json();
 
     // Get unique routes and their details from the stops data
-    const routeMap = new Map<string, MTARoute>();
+    const routeMap = new Map<string, BusLine>();
     const stopsByRoute = new Map<
       string,
       Array<{ name: string; distance: number }>
@@ -134,9 +126,6 @@ export async function GET(request: NextRequest) {
     const nearbyRoutes = routes
       .sort((a, b) => a.distance - b.distance)
       .slice(0, 5);
-
-    if (nearbyRoutes.length === 0) {
-    }
 
     const apiResponse: ApiResponse<{ busLines: NearbyBusLine[] }> = {
       success: true,

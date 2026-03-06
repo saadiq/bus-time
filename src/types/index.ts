@@ -73,17 +73,6 @@ export interface StopInfo {
 }
 
 // Error types
-export class APIError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public code?: string
-  ) {
-    super(message);
-    this.name = 'APIError';
-  }
-}
-
 export class ValidationError extends Error {
   constructor(
     message: string,
