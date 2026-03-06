@@ -1,48 +1,19 @@
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 import { validateBusLineId, ValidationError, isRateLimited, getClientId } from '@/lib/validation';
-import { BusStop, Direction, ApiResponse } from '@/types';
+import { ApiResponse } from '@/types';
+import {
+  MTAApiResponse,
+  buildStopsMap,
+  fetchMissingStops,
+  processStopGroupings,
+} from '@/lib/stop-processing';
 
 // Route Segment Config for Next.js caching
 export const revalidate = 1800; // 30 minutes in seconds
 
 // Rate limiting storage
 const requestMap = new Map<string, number[]>();
-
-interface StopReference {
-  id: string;
-  code?: string;
-  name?: string;
-  lat?: number;
-  lon?: number;
-  [key: string]: unknown;
-}
-
-interface StopGroup {
-  id?: { id: string } | string;
-  name?: { name: string; names?: string[] };
-  stopIds?: string[];
-  [key: string]: unknown;
-}
-
-interface MTAApiResponse {
-  code?: number;
-  text?: string;
-  data?: {
-    entry?: {
-      stopGroupings?: Array<{
-        stopGroups?: StopGroup[];
-      }>;
-      references?: {
-        stops?: StopReference[];
-      };
-    };
-    references?: {
-      stops?: StopReference[];
-    };
-  };
-}
-
 
 export async function GET(request: NextRequest) {
   try {
@@ -87,12 +58,9 @@ export async function GET(request: NextRequest) {
       lineId
     )}.json?key=${apiKey}&includePolylines=false&includeReferences=true&version=2`;
 
-
     const response = await fetch(url, {
       cache: "no-store",
-      headers: {
-        "Cache-Control": "no-cache",
-      },
+      headers: { "Cache-Control": "no-cache" },
     });
 
     if (!response.ok) {
@@ -122,211 +90,32 @@ export async function GET(request: NextRequest) {
     // Extract stops data
     const entry = data.data?.entry;
     if (!entry) {
-      console.error("Missing entry in API response. Data structure:", {
-        hasData: !!data.data,
-        dataKeys: data.data ? Object.keys(data.data) : [],
-      });
+      console.error("Missing entry in API response");
       return NextResponse.json(
         { error: "Missing entry in API response" },
         { status: 500 }
       );
     }
-    
 
-    // First, build a map of all stops from the references section
-    const stopsMap: Record<string, StopReference> = {};
-    
-    // Check if stops are in the references section
-    if (entry.references?.stops && Array.isArray(entry.references.stops)) {
-      entry.references.stops.forEach((stop) => {
-        if (stop.id) {
-          stopsMap[stop.id] = stop;
-        }
-      });
-    } else {
-      // Sometimes the API returns stops in data.references
-      if (data.data?.references?.stops && Array.isArray(data.data.references.stops)) {
-        data.data.references.stops.forEach((stop: StopReference) => {
-          if (stop.id) {
-            stopsMap[stop.id] = stop;
-          }
-        });
-      }
-    }
-
-    if (Object.keys(stopsMap).length === 0) {
-      console.warn(
-        "No stops found in references section. Will fetch individually."
-      );
-
-      // Extract direction information from the stop groupings
-      const stopGroupings = entry.stopGroupings;
-      if (!stopGroupings || stopGroupings.length === 0) {
-        console.warn("No stop groupings found. Raw entry:", {
-          hasStopGroupings: !!entry.stopGroupings,
-          stopGroupingsLength: entry.stopGroupings?.length || 0,
-          entryKeys: Object.keys(entry),
-        });
-        return NextResponse.json(
-          { error: "Missing stopGroupings in API response" },
-          { status: 500 }
-        );
-      }
-
-      // If no stops in references, we need to fetch them individually
-      // First, collect all unique stop IDs from the stopGroupings
-      const allStopIds = new Set<string>();
-      stopGroupings.forEach((grouping) => {
-        grouping.stopGroups?.forEach((group) => {
-          if (group.stopIds) {
-            const stopIds = Array.isArray(group.stopIds)
-              ? group.stopIds
-              : [group.stopIds];
-            stopIds.forEach((id) => allStopIds.add(id));
-          }
-        });
-      });
-
-      
-      // Fetch stop details in parallel (limit concurrent requests)
-      const stopPromises = Array.from(allStopIds).map(async (stopId) => {
-        try {
-          const stopUrl = `https://bustime.mta.info/api/where/stop/${encodeURIComponent(
-            stopId
-          )}.json?key=${apiKey}&version=2`;
-          const response = await fetch(stopUrl, {
-            cache: "no-store",
-            headers: {
-              "Cache-Control": "no-cache",
-            },
-          });
-
-          if (!response.ok) {
-            console.warn(`Failed to fetch stop ${stopId}:`, response.status);
-            return null;
-          }
-
-          const stopData = await response.json();
-          if (stopData.code === 200 && stopData.data?.entry) {
-            const stop = stopData.data.entry;
-            stopsMap[stopId] = {
-              id: stopId,
-              code: stop.code || "",
-              name: stop.name || "Unknown Stop",
-              lat: stop.lat || 0,
-              lon: stop.lon || 0,
-            };
-            return stop;
-          } else {
-            console.warn(`Invalid data for stop ${stopId}:`, stopData.code);
-          }
-        } catch (err) {
-          console.warn(`Error fetching stop ${stopId}:`, err);
-        }
-        return null;
-      });
-
-      // Wait for all stop details to be fetched
-      await Promise.all(stopPromises);
-    }
-
-    // Extract direction information from the stop groupings
     const stopGroupings = entry.stopGroupings;
     if (!stopGroupings || stopGroupings.length === 0) {
-      console.warn("No stop groupings found. Raw entry:", {
-        hasStopGroupings: !!entry.stopGroupings,
-        stopGroupingsLength: entry.stopGroupings?.length || 0,
-        entryKeys: Object.keys(entry),
-      });
       return NextResponse.json(
         { error: "Missing stopGroupings in API response" },
         { status: 500 }
       );
     }
 
-    // Process stop groupings to extract direction information and stops
-    const directionsArray: Direction[] = [];
-    const stopsArray: BusStop[] = [];
-    let sequence = 1;
-
-
-    // Process each stop grouping
-    for (const grouping of stopGroupings) {
-      if (grouping.stopGroups) {
-        for (const group of grouping.stopGroups) {
-          // Extract direction information
-          let directionId = "";
-          let directionName = "";
-
-          if (group.id) {
-            directionId =
-              typeof group.id === "string" ? group.id : group.id.id || "";
-          }
-
-          if (group.name) {
-            if (typeof group.name === "string") {
-              directionName = group.name;
-            } else if (typeof group.name === "object") {
-              directionName =
-                group.name.name ||
-                (group.name.names && group.name.names[0]) ||
-                "";
-            }
-          }
-
-          if (directionId && directionName) {
-            directionsArray.push({ id: directionId, name: directionName });
-
-            // Process stops for this direction
-            if (group.stopIds) {
-              const stopIds = Array.isArray(group.stopIds)
-                ? group.stopIds
-                : [group.stopIds];
-
-
-              stopIds.forEach((stopId) => {
-                const stopDetails = stopsMap[stopId];
-                if (stopDetails) {
-                  stopsArray.push({
-                    id: stopId,
-                    code: stopDetails.code || "",
-                    name: stopDetails.name || "Unknown Stop",
-                    direction: directionName,
-                    sequence: sequence++,
-                    lat: stopDetails.lat || 0,
-                    lon: stopDetails.lon || 0,
-                  });
-                } else {
-                  console.warn(
-                    `Stop ${stopId} not found in stopsMap for direction ${directionName}, skipping`
-                  );
-                }
-              });
-            } else {
-              console.warn(`No stopIds found for direction ${directionName}`);
-            }
-          } else {
-            console.warn("Invalid direction data:", { group });
-          }
-        }
-      } else {
-        console.warn("No stop groups found in grouping:", grouping);
-      }
+    // Build stops map from references, or fetch individually if missing
+    const stopsMap = buildStopsMap(data);
+    if (Object.keys(stopsMap).length === 0) {
+      console.warn("No stops in references section, fetching individually.");
+      await fetchMissingStops(stopGroupings, apiKey, stopsMap);
     }
 
+    // Process stop groupings into directions and stops
+    const { directions, stops } = processStopGroupings(stopGroupings, stopsMap);
 
-    // Check if we have any stops
-    
-    if (stopsArray.length === 0) {
-      console.warn("No stops found after processing. Debug info:", {
-        stopsMapSize: Object.keys(stopsMap).length,
-        directionsCount: directionsArray.length,
-        stopGroupingsCount: stopGroupings.length,
-        stopGroupsCount: stopGroupings.reduce(
-          (acc, g) => acc + (g.stopGroups?.length || 0),
-          0
-        ),
-      });
+    if (stops.length === 0) {
       const errorResponse: ApiResponse<never> = {
         success: false,
         error: "No stops could be extracted for this route"
@@ -335,29 +124,26 @@ export async function GET(request: NextRequest) {
     }
 
     // Return the results
-    const apiResponse: ApiResponse<{ routeId: string; directions: Direction[]; stops: BusStop[] }> = {
+    return NextResponse.json({
       success: true,
       data: {
         routeId: lineId,
-        directions: directionsArray,
-        stops: stopsArray,
+        directions,
+        stops,
       }
-    };
-    
-    return NextResponse.json(apiResponse);
+    });
   } catch (error) {
     console.error("Error in bus-stops API route:", {
       message: error instanceof Error ? error.message : 'Unknown error',
       url: request.url,
-      lineId: 'validation-failed',
       timestamp: new Date().toISOString()
     });
-    
+
     const errorResponse: ApiResponse<never> = {
       success: false,
       error: "Failed to fetch bus stops"
     };
-    
+
     return NextResponse.json(errorResponse, { status: 500 });
   }
 }
