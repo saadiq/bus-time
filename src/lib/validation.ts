@@ -3,14 +3,6 @@ import { ValidationError } from '@/types';
 // Re-export for convenience
 export { ValidationError };
 
-// Input validation utilities
-export const validateRequired = (value: string | null | undefined, fieldName: string): string => {
-  if (!value || value.trim() === '') {
-    throw new ValidationError(`${fieldName} is required`, fieldName);
-  }
-  return value.trim();
-};
-
 export const validateString = (
   value: string | null | undefined,
   fieldName: string,
@@ -148,14 +140,6 @@ export const validateSearchQuery = (query: string | null | undefined): string =>
   });
 };
 
-// Sanitization utilities
-export const sanitizeString = (str: string): string => {
-  return str
-    .replace(/[<>]/g, '') // Remove potential HTML tags
-    .replace(/['"]/g, '') // Remove quotes
-    .trim();
-};
-
 export const sanitizeSearchQuery = (query: string): string => {
   return query
     .toLowerCase()
@@ -163,59 +147,26 @@ export const sanitizeSearchQuery = (query: string): string => {
     .trim();
 };
 
-// Type guards
-export const isBusLine = (obj: unknown): obj is import('@/types').BusLine => {
-  return (
-    typeof obj === 'object' &&
-    obj !== null &&
-    'id' in obj &&
-    'shortName' in obj &&
-    'longName' in obj &&
-    'description' in obj &&
-    'agencyId' in obj
-  );
-};
-
-export const isBusStop = (obj: unknown): obj is import('@/types').BusStop => {
-  return (
-    typeof obj === 'object' &&
-    obj !== null &&
-    'id' in obj &&
-    'code' in obj &&
-    'name' in obj &&
-    'direction' in obj &&
-    'sequence' in obj &&
-    'lat' in obj &&
-    'lon' in obj
-  );
-};
-
 // Get client identifier for rate limiting
 export const getClientId = (request: { headers: { get: (name: string) => string | null } }): string => {
-  // Try to get real IP from various headers
   const forwarded = request.headers.get('x-forwarded-for');
-  const realIp = request.headers.get('x-real-ip');
-  const remoteAddr = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip');
-  
   if (forwarded) {
-    const ips = forwarded.split(',');
-    return ips[0].trim();
+    return forwarded.split(',')[0].trim();
   }
-  
+
+  const realIp = request.headers.get('x-real-ip');
   if (realIp) {
     return realIp;
   }
-  
-  if (remoteAddr) {
-    return remoteAddr;
-  }
-  
-  // Fallback to user agent + a random component for some differentiation
+
   const userAgent = request.headers.get('user-agent') || '';
   return `anonymous-${userAgent.slice(0, 20)}`;
 };
 
 // Rate limiting utilities
+let rateLimitCallCount = 0;
+const CLEANUP_INTERVAL = 100;
+
 export const isRateLimited = (
   requests: Map<string, number[]>,
   identifier: string,
@@ -223,18 +174,31 @@ export const isRateLimited = (
   window: number = 60000 // 1 minute in milliseconds
 ): boolean => {
   const now = Date.now();
+
+  // Periodically sweep the entire map to remove stale entries
+  rateLimitCallCount++;
+  if (rateLimitCallCount >= CLEANUP_INTERVAL) {
+    rateLimitCallCount = 0;
+    for (const [key, timestamps] of requests) {
+      const newest = timestamps[timestamps.length - 1];
+      if (newest === undefined || now - newest >= window) {
+        requests.delete(key);
+      }
+    }
+  }
+
   const userRequests = requests.get(identifier) || [];
-  
+
   // Remove old requests outside the window
   const recentRequests = userRequests.filter(timestamp => now - timestamp < window);
-  
+
   if (recentRequests.length >= limit) {
     return true;
   }
-  
+
   // Add current request
   recentRequests.push(now);
   requests.set(identifier, recentRequests);
-  
+
   return false;
 };
