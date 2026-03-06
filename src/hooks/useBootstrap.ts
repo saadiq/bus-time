@@ -134,14 +134,18 @@ export function useBootstrap(params: UseBootstrapParams) {
         if (storedCutoffTime) setCutoffTime(storedCutoffTime);
       }
     }
-    cutoffHydrated.current = true;
   }, [query, setEnableCutoff, setCutoffTime]);
 
   useEffect(() => {
-    if (!cutoffHydrated.current) return;
+    if (!cutoffHydrated.current) {
+      cutoffHydrated.current = true;
+      return;
+    }
     safeLocalStorage.setItem('enableCutoff', String(enableCutoff));
     if (enableCutoff) {
       safeLocalStorage.setItem('cutoffTime', cutoffTime);
+    } else {
+      safeLocalStorage.removeItem('cutoffTime');
     }
   }, [enableCutoff, cutoffTime]);
 
