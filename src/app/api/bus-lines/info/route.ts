@@ -47,24 +47,29 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Use the OneBusAway API to get all bus routes
-    const url = `https://bustime.mta.info/api/where/routes-for-agency/MTA%20NYCT.json?key=${apiKey}`;
+    // Use the OneBusAway API to get a single route by ID
+    const url = `https://bustime.mta.info/api/where/route/${encodeURIComponent(lineId)}.json?key=${apiKey}`;
 
     const response = await fetch(url, {
       cache: "no-store", // Ensures the fetch is fresh when revalidation occurs
     });
 
+    if (response.status === 404) {
+      const errorResponse: ApiResponse<never> = {
+        success: false,
+        error: "Bus line not found"
+      };
+      return NextResponse.json(errorResponse, { status: 404 });
+    }
+
     if (!response.ok) {
-      throw new Error(`Failed to fetch bus lines: ${response.status}`);
+      throw new Error(`Failed to fetch bus line: ${response.status}`);
     }
 
     const data = await response.json();
 
-    // Extract routes from the response
-    const routes = data.data?.list || [];
-
-    // Find the requested bus line
-    const busLine = routes.find((route: ApiRoute) => route.id === lineId);
+    // Extract the route from the response
+    const busLine: ApiRoute | undefined = data.data?.entry;
 
     if (!busLine) {
       const errorResponse: ApiResponse<never> = {
