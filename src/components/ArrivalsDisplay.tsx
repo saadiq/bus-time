@@ -12,6 +12,12 @@ interface ArrivalsDisplayProps {
   getMinutesUntil: (date: Date | null) => number | string;
 }
 
+const statusConfig = {
+  late: { label: 'LATE', color: 'text-[var(--status-danger)]', border: 'status-bar--danger' },
+  warning: { label: 'CUTTING IT CLOSE', color: 'text-[var(--status-warning)]', border: 'status-bar--warning' },
+  normal: { label: 'ON TIME', color: 'text-[var(--status-good)]', border: 'status-bar--good' },
+};
+
 const ArrivalsDisplay = ({
   loading,
   error,
@@ -23,72 +29,81 @@ const ArrivalsDisplay = ({
   getMinutesUntil,
 }: ArrivalsDisplayProps) => {
   return (
-    <section className="brutal-card border-t-0 min-h-[200px]">
-      <div className="px-6 py-3 border-b-[3px] border-[var(--black)] flex justify-between items-center text-xs font-mono text-[var(--muted)]">
-        <span>{lastRefresh?.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) || '...'}</span>
+    <section className="flex-1 px-1">
+      <div className="flex justify-between items-center px-3 py-2 text-xs text-[var(--text-muted)]">
+        <span>
+          {lastRefresh
+            ? `Updated ${lastRefresh.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
+            : '...'}
+        </span>
         <span className={nextRefreshIn <= 5 ? 'animate-pulse-slow' : ''}>
           {nextRefreshIn}s
         </span>
       </div>
 
-      <div className="p-6">
-        {loading && (
-          <div className="flex items-center justify-center py-12 gap-3">
-            <div className="animate-spin h-6 w-6 border-3 border-[var(--black)] border-t-transparent"></div>
-            <span className="font-mono text-sm">LOADING</span>
-          </div>
-        )}
+      {loading && (
+        <div className="flex flex-col items-center justify-center py-16 gap-3">
+          <div className="animate-spin h-6 w-6 border-2 border-[var(--accent)] border-t-transparent rounded-full"></div>
+          <span className="text-sm text-[var(--text-secondary)]">Loading arrivals...</span>
+        </div>
+      )}
 
-        {error && (
-          <div className="p-4 bg-[var(--danger)] text-white">
-            <p className="font-medium">{error}</p>
-            <p className="text-sm mt-2 opacity-80">Try different stops or route.</p>
-          </div>
-        )}
+      {error && (
+        <div className="mx-2 p-4 bg-red-50 text-[var(--status-danger)] rounded-xl">
+          <p className="font-medium text-sm">{error}</p>
+          <p className="text-xs mt-1 opacity-70">Try different stops or route.</p>
+        </div>
+      )}
 
-        {!loading && !error && arrivals.length === 0 && (
-          <div className="py-12 text-center">
-            <div className="font-display text-4xl text-[var(--muted)]">NO BUSES</div>
-            <p className="text-sm text-[var(--muted)] mt-2">None scheduled at this time</p>
-          </div>
-        )}
+      {!loading && !error && arrivals.length === 0 && (
+        <div className="py-16 text-center">
+          <div className="text-5xl mb-3 opacity-30">&#128652;</div>
+          <p className="text-lg font-semibold text-[var(--text-secondary)]">No buses right now</p>
+          <p className="text-sm text-[var(--text-muted)] mt-1">None scheduled at this time</p>
+        </div>
+      )}
 
-        {!loading && !error && arrivals.length > 0 && (
-          <div className="space-y-3 stagger-children">
-            {arrivals.map((bus) => {
-              const destinationStatus = bus.destinationArrival ? getBusStatus(bus.destinationArrival) : 'normal';
-              const statusClass = destinationStatus === 'late' ? 'status-bar--danger' :
-                destinationStatus === 'warning' ? 'status-bar--warning' : 'status-bar--good';
+      {!loading && !error && arrivals.length > 0 && (
+        <div className="space-y-3 stagger-children px-1">
+          {arrivals.map((bus) => {
+            const destinationStatus = bus.destinationArrival ? getBusStatus(bus.destinationArrival) : 'normal';
+            const config = statusConfig[destinationStatus as keyof typeof statusConfig] || statusConfig.normal;
 
-              return (
-                <div
-                  key={bus.vehicleId}
-                  className="flex border-[3px] border-[var(--black)] bg-white overflow-hidden"
-                >
-                  <div className={`status-bar ${statusClass}`}></div>
+            return (
+              <div
+                key={bus.vehicleId}
+                className="card flex overflow-hidden"
+              >
+                <div className={`status-bar ${config.border}`}></div>
 
-                  <div className="flex-1 p-4 flex items-center justify-between">
-                    <div className="flex items-baseline gap-1">
-                      <span className="font-display text-5xl leading-none">{getMinutesUntil(bus.originArrival)}</span>
-                      <span className="font-display text-xl text-[var(--muted)]">MIN</span>
+                <div className="flex-1 p-4 flex items-center justify-between">
+                  <div>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-4xl font-bold leading-none tracking-tight">{getMinutesUntil(bus.originArrival)}</span>
+                      <span className="text-base font-medium text-[var(--text-muted)]">min</span>
                     </div>
+                    <div className="mt-1">
+                      <span className={`text-xs font-semibold ${config.color}`}>
+                        {config.label}
+                      </span>
+                    </div>
+                  </div>
 
-                    <div className="text-right">
-                      <div className="text-xs font-mono text-[var(--muted)]">
-                        {bus.stopsAway} {bus.stopsAway === 1 ? 'STOP' : 'STOPS'}
-                      </div>
-                      <div className="font-mono text-lg font-semibold">
-                        {bus.isEstimated && <span className="text-[var(--muted)]">~</span>}
-                        {formatTime(bus.destinationArrival)}
-                      </div>
+                  <div className="text-right">
+                    <div className="text-xs text-[var(--text-muted)]">
+                      {bus.stopsAway} {bus.stopsAway === 1 ? 'stop' : 'stops'} away
+                    </div>
+                    <div className="text-base font-semibold mt-0.5">
+                      {bus.isEstimated && <span className="text-[var(--text-muted)]">~</span>}
+                      {formatTime(bus.destinationArrival)}
                     </div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 };

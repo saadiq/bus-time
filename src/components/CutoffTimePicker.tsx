@@ -15,23 +15,23 @@ const CutoffTimePicker = ({
   onCutoffTimeChange,
 }: CutoffTimePickerProps) => {
   return (
-    <div className="pt-3 border-t-2 border-[var(--black)] border-dashed">
+    <div className="pt-4 border-t border-[var(--border-light)]">
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-3">
           <Switch
             checked={enableCutoff}
             onChange={onCutoffChange}
-            className={`${enableCutoff ? 'bg-[var(--mta-yellow)]' : 'bg-[var(--muted)]'} relative inline-flex h-6 w-11 items-center border-2 border-[var(--black)] transition-colors`}
+            className={`${enableCutoff ? 'bg-[var(--accent)]' : 'bg-gray-200'} relative inline-flex h-6 w-11 items-center rounded-full transition-colors`}
           >
-            <span className={`${enableCutoff ? 'translate-x-5' : 'translate-x-0'} inline-block h-5 w-5 transform bg-[var(--black)] transition-transform`} />
+            <span className={`${enableCutoff ? 'translate-x-5' : 'translate-x-1'} inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-sm`} />
           </Switch>
-          <span className="text-sm font-medium">ARRIVE BY</span>
+          <span className="text-sm font-medium text-[var(--text-primary)]">Arrive by</span>
         </div>
         <input
           type="time"
           value={cutoffTime}
           onChange={(e) => onCutoffTimeChange(e.target.value)}
-          className="brutal-input text-sm font-mono"
+          className="input text-sm"
           disabled={!enableCutoff}
         />
       </div>

@@ -16,11 +16,11 @@ const DirectionSelector = ({
 }: DirectionSelectorProps) => {
   return (
     <div>
-      <label className="font-display text-sm tracking-wide block mb-2">DIRECTION</label>
+      <label className="text-sm font-semibold text-[var(--text-primary)] block mb-2">Direction</label>
       <select
         value={selectedDirection}
         onChange={(e) => onDirectionChange(e.target.value)}
-        className="brutal-select w-full"
+        className="select w-full"
       >
         {directions.map((direction, index) => (
           <option key={`dir-${direction.id}-${index}`} value={direction.id}>
@@ -28,8 +28,8 @@ const DirectionSelector = ({
           </option>
         ))}
       </select>
-      <p className="text-xs text-[var(--muted)] mt-1 font-mono">
-        {currentStopsCount} STOPS
+      <p className="text-xs text-[var(--text-muted)] mt-1">
+        {currentStopsCount} stops
       </p>
     </div>
   );
