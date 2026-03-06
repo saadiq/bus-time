@@ -69,7 +69,7 @@ const BusLineSearch = ({
       )}
 
       {showBusLineResults && busLineResults.length > 0 && (
-        <div className="absolute z-20 mt-1 left-0 right-0 bg-white rounded-xl shadow-lg border border-[var(--border-light)] max-h-60 overflow-auto">
+        <div className="absolute z-20 mt-1 left-0 right-0 bg-[var(--bg)] rounded-xl shadow-lg border border-[var(--border-light)] max-h-60 overflow-auto">
           {busLineResults.map(line => (
             <div
               key={line.id}

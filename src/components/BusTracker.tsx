@@ -25,7 +25,7 @@ const BusTrackerContent = () => {
 
   const {
     arrivals, error, busStopError, loading, data, cutoffTime, enableCutoff,
-    lastRefresh, nextRefreshIn, busLineSearch, busLineResults, busLineLoading: _busLineLoading,
+    lastRefresh, nextRefreshIn, busLineSearch, busLineResults,
     showBusLineResults, stops, directions, selectedDirection, stopsLoading,
     busLineId, originId, destinationId, isConfigOpen, forceUpdate,
     geoLoading, geoError

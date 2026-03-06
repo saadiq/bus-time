@@ -72,7 +72,7 @@ const SettingsPanel = ({
       <DialogBackdrop className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity" />
 
       <div className="fixed inset-0 flex items-end justify-center">
-        <DialogPanel className="w-full max-w-xl bg-white rounded-t-2xl shadow-lg animate-slide-up max-h-[85vh] overflow-auto">
+        <DialogPanel className="w-full max-w-xl bg-[var(--bg)] rounded-t-2xl shadow-lg animate-slide-up max-h-[85vh] overflow-auto">
           <div className="flex justify-center pt-3 pb-1">
             <div className="w-10 h-1 bg-[var(--border-light)] rounded-full" />
           </div>
