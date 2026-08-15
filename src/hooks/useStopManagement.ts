@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { BusStop, Direction } from '@/types';
 import { calculateDistance, SAME_LOCATION_THRESHOLD } from '@/lib/geo';
 import { findClosestStopInList } from '@/lib/busLineUtils';
@@ -36,7 +36,9 @@ export function useStopManagement(params: UseStopManagementParams) {
 
   const stopsAbortControllerRef = useRef<AbortController | null>(null);
   const busLineSearchRef = useRef(busLineSearch);
-  busLineSearchRef.current = busLineSearch;
+  useEffect(() => {
+    busLineSearchRef.current = busLineSearch;
+  }, [busLineSearch]);
 
   const fetchStopsForLine = useCallback(async (lineId: string, preserveOriginId?: string, preserveDestinationId?: string): Promise<void> => {
     const currentBusLineSearch = busLineSearchRef.current;
