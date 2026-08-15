@@ -4,7 +4,7 @@ import ErrorBoundary from '@/components/ErrorBoundary'
 
 export default function Home() {
   return (
-    <main className="min-h-screen p-4 bg-[var(--bg-card)]">
+    <main className="min-h-screen p-4 bg-(--bg-card)">
       <ErrorBoundary>
         <BusTracker />
       </ErrorBoundary>

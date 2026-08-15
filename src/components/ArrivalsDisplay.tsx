@@ -13,9 +13,9 @@ interface ArrivalsDisplayProps {
 }
 
 const statusConfig = {
-  late: { label: 'LATE', color: 'text-[var(--status-danger)]', border: 'status-bar--danger' },
-  warning: { label: 'CUTTING IT CLOSE', color: 'text-[var(--status-warning)]', border: 'status-bar--warning' },
-  normal: { label: '', color: 'text-[var(--status-good)]', border: 'status-bar--good' },
+  late: { label: 'LATE', color: 'text-(--status-danger)', border: 'status-bar--danger' },
+  warning: { label: 'CUTTING IT CLOSE', color: 'text-(--status-warning)', border: 'status-bar--warning' },
+  normal: { label: '', color: 'text-(--status-good)', border: 'status-bar--good' },
 };
 
 const ArrivalsDisplay = ({
@@ -30,7 +30,7 @@ const ArrivalsDisplay = ({
 }: ArrivalsDisplayProps) => {
   return (
     <section className="flex-1 px-1">
-      <div className="flex justify-between items-center px-3 py-2 text-xs text-[var(--text-muted)]">
+      <div className="flex justify-between items-center px-3 py-2 text-xs text-(--text-muted)">
         <span>
           {lastRefresh
             ? `Updated ${lastRefresh.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
@@ -43,13 +43,13 @@ const ArrivalsDisplay = ({
 
       {loading && (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
-          <div className="animate-spin h-6 w-6 border-2 border-[var(--accent)] border-t-transparent rounded-full"></div>
-          <span className="text-sm text-[var(--text-secondary)]">Loading arrivals...</span>
+          <div className="animate-spin h-6 w-6 border-2 border-(--accent) border-t-transparent rounded-full"></div>
+          <span className="text-sm text-(--text-secondary)">Loading arrivals...</span>
         </div>
       )}
 
       {error && (
-        <div className="mx-2 p-4 bg-red-50 text-[var(--status-danger)] rounded-xl">
+        <div className="mx-2 p-4 bg-red-50 text-(--status-danger) rounded-xl">
           <p className="font-medium text-sm">{error}</p>
           <p className="text-xs mt-1 opacity-70">Try different stops or route.</p>
         </div>
@@ -58,8 +58,8 @@ const ArrivalsDisplay = ({
       {!loading && !error && arrivals.length === 0 && (
         <div className="py-16 text-center">
           <div className="text-5xl mb-3 opacity-30">&#128652;</div>
-          <p className="text-lg font-semibold text-[var(--text-secondary)]">No buses right now</p>
-          <p className="text-sm text-[var(--text-muted)] mt-1">None scheduled at this time</p>
+          <p className="text-lg font-semibold text-(--text-secondary)">No buses right now</p>
+          <p className="text-sm text-(--text-muted) mt-1">None scheduled at this time</p>
         </div>
       )}
 
@@ -80,7 +80,7 @@ const ArrivalsDisplay = ({
                   <div>
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-4xl font-bold leading-none tracking-tight">{getMinutesUntil(bus.originArrival)}</span>
-                      <span className="text-base font-medium text-[var(--text-muted)]">min</span>
+                      <span className="text-base font-medium text-(--text-muted)">min</span>
                     </div>
                     <div className="mt-1">
                       <span className={`text-xs font-semibold ${config.color}`}>
@@ -90,11 +90,11 @@ const ArrivalsDisplay = ({
                   </div>
 
                   <div className="text-right">
-                    <div className="text-xs text-[var(--text-muted)]">
+                    <div className="text-xs text-(--text-muted)">
                       {bus.stopsAway} {bus.stopsAway === 1 ? 'stop' : 'stops'} away
                     </div>
                     <div className="text-base font-semibold mt-0.5">
-                      {bus.isEstimated && <span className="text-[var(--text-muted)]">~</span>}
+                      {bus.isEstimated && <span className="text-(--text-muted)">~</span>}
                       {formatTime(bus.destinationArrival)}
                     </div>
                   </div>

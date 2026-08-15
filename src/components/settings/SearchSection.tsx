@@ -12,10 +12,10 @@ const SearchSection = () => {
   return (
     <div className="relative">
       <div className="flex justify-between items-center mb-2">
-        <label className="text-sm font-semibold text-[var(--text-primary)]">Bus Line</label>
+        <label className="text-sm font-semibold text-(--text-primary)">Bus Line</label>
         <button
           onClick={onReset}
-          className="text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+          className="text-xs font-medium text-(--text-muted) hover:text-(--text-primary) transition-colors"
         >
           Reset
         </button>
@@ -46,23 +46,23 @@ const SearchSection = () => {
       </div>
 
       {geoError && (
-        <div className="mt-2 p-3 bg-red-50 text-[var(--status-danger)] text-sm font-medium rounded-lg">
+        <div className="mt-2 p-3 bg-red-50 text-(--status-danger) text-sm font-medium rounded-lg">
           {geoError}
         </div>
       )}
 
       {showBusLineResults && busLineResults.length > 0 && (
-        <div className="absolute z-20 mt-1 left-0 right-0 bg-[var(--bg)] rounded-xl shadow-lg border border-[var(--border-light)] max-h-60 overflow-auto">
+        <div className="absolute z-20 mt-1 left-0 right-0 bg-(--bg) rounded-xl shadow-lg border border-(--border-light) max-h-60 overflow-auto">
           {busLineResults.map(line => (
             <div
               key={line.id}
-              className="px-4 py-3 hover:bg-[var(--bg-card)] cursor-pointer border-b border-[var(--border-light)] last:border-b-0 transition-colors"
+              className="px-4 py-3 hover:bg-(--bg-card) cursor-pointer border-b border-(--border-light) last:border-b-0 transition-colors"
               onClick={() => onSelectBusLine(line as BusLine)}
             >
               <div className="text-sm font-semibold">{line.shortName}</div>
-              <div className="text-xs text-[var(--text-secondary)]">{line.longName}</div>
+              <div className="text-xs text-(--text-secondary)">{line.longName}</div>
               {'distance' in line && (
-                <div className="text-xs font-medium text-[var(--accent)] mt-0.5">
+                <div className="text-xs font-medium text-(--accent) mt-0.5">
                   {((line as NearbyBusLine).distance < 0.1
                     ? 'Nearby'
                     : `${(line as NearbyBusLine).distance.toFixed(1)} mi`)}

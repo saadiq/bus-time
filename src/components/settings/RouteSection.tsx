@@ -18,7 +18,7 @@ const RouteSection = () => {
 
       {busLineId && directions.length > 0 && (
         <div>
-          <label className="text-sm font-semibold text-[var(--text-primary)] block mb-2">Direction</label>
+          <label className="text-sm font-semibold text-(--text-primary) block mb-2">Direction</label>
           <select
             value={selectedDirection}
             onChange={(e) => onDirectionChange(e.target.value)}
@@ -30,7 +30,7 @@ const RouteSection = () => {
               </option>
             ))}
           </select>
-          <p className="text-xs text-[var(--text-muted)] mt-1">
+          <p className="text-xs text-(--text-muted) mt-1">
             {currentStops.length} stops
           </p>
         </div>
@@ -38,7 +38,7 @@ const RouteSection = () => {
 
       <div className="flex gap-2 items-end">
         <div className="flex-1">
-          <label className="text-sm font-semibold text-[var(--text-primary)] block mb-2">From</label>
+          <label className="text-sm font-semibold text-(--text-primary) block mb-2">From</label>
           <select
             value={originId}
             onChange={(e) => onOriginChange(e.target.value)}
@@ -58,7 +58,7 @@ const RouteSection = () => {
 
         <button
           onClick={onSwapDirections}
-          className="btn-ghost p-2.5 mb-[1px] rounded-lg"
+          className="btn-ghost p-2.5 mb-px rounded-lg"
           aria-label="Switch direction"
           title={directions.length > 1 ? "Switch to opposite direction" : "Swap origin and destination"}
           disabled={!busLineId || !selectedDirection}
@@ -69,7 +69,7 @@ const RouteSection = () => {
         </button>
 
         <div className="flex-1">
-          <label className="text-sm font-semibold text-[var(--text-primary)] block mb-2">To</label>
+          <label className="text-sm font-semibold text-(--text-primary) block mb-2">To</label>
           <select
             value={destinationId}
             onChange={(e) => onDestinationChange(e.target.value)}
@@ -89,8 +89,8 @@ const RouteSection = () => {
       </div>
 
       {stopsLoading && (
-        <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-          <div className="animate-spin h-4 w-4 border-2 border-[var(--accent)] border-t-transparent rounded-full"></div>
+        <div className="flex items-center gap-2 text-sm text-(--text-secondary)">
+          <div className="animate-spin h-4 w-4 border-2 border-(--accent) border-t-transparent rounded-full"></div>
           <span>Loading stops...</span>
         </div>
       )}

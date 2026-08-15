@@ -40,7 +40,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 The application encountered an error. Please try refreshing the page.
               </p>
               {this.state.error && (
-                <details className="bg-gray-100 p-3 rounded text-sm">
+                <details className="bg-gray-100 p-3 rounded-sm text-sm">
                   <summary className="cursor-pointer font-medium">Error Details</summary>
                   <pre className="mt-2 text-xs overflow-auto">
                     {this.state.error.toString()}
@@ -50,7 +50,7 @@ export class ErrorBoundary extends Component<Props, State> {
               )}
               <button
                 onClick={() => window.location.reload()}
-                className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded"
+                className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-sm"
               >
                 Refresh Page
               </button>

@@ -7,7 +7,7 @@ const ResetButton = () => {
   return (
     <button
       onClick={() => { onReset(); onClose(); }}
-      className="w-full py-2.5 text-sm font-medium text-[var(--status-danger)] bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
+      className="w-full py-2.5 text-sm font-medium text-(--status-danger) bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
     >
       Reset Route
     </button>

@@ -6,17 +6,17 @@ const CutoffSection = () => {
   const { enableCutoff, cutoffTime, onCutoffChange, onCutoffTimeChange } = useSettings();
 
   return (
-    <div className="pt-4 border-t border-[var(--border-light)]">
+    <div className="pt-4 border-t border-(--border-light)">
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-3">
           <Switch
             checked={enableCutoff}
             onChange={onCutoffChange}
-            className={`${enableCutoff ? 'bg-[var(--accent)]' : 'bg-gray-200'} relative inline-flex h-6 w-11 items-center rounded-full transition-colors`}
+            className={`${enableCutoff ? 'bg-(--accent)' : 'bg-gray-200'} relative inline-flex h-6 w-11 items-center rounded-full transition-colors`}
           >
-            <span className={`${enableCutoff ? 'translate-x-5' : 'translate-x-1'} inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-sm`} />
+            <span className={`${enableCutoff ? 'translate-x-5' : 'translate-x-1'} inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-xs`} />
           </Switch>
-          <span className="text-sm font-medium text-[var(--text-primary)]">Arrive by</span>
+          <span className="text-sm font-medium text-(--text-primary)">Arrive by</span>
         </div>
         <input
           type="time"

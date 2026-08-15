@@ -195,7 +195,7 @@ const BusTrackerContent = () => {
 
 const BusTracker = () => {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center min-h-screen text-[var(--text-muted)]">Loading...</div>}>
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen text-(--text-muted)">Loading...</div>}>
       <BusTrackerContent />
     </Suspense>
   );

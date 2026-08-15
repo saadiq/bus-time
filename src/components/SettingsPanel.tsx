@@ -11,16 +11,16 @@ const SettingsPanel = () => {
 
   return (
     <Dialog open={isOpen} onClose={onClose} className="relative z-50">
-      <DialogBackdrop className="fixed inset-0 bg-black/40 backdrop-blur-sm transition-opacity" />
+      <DialogBackdrop className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity" />
 
       <div className="fixed inset-0 flex items-end justify-center">
-        <DialogPanel className="w-full max-w-xl bg-[var(--bg)] rounded-t-2xl shadow-lg animate-slide-up max-h-[85vh] overflow-auto">
+        <DialogPanel className="w-full max-w-xl bg-(--bg) rounded-t-2xl shadow-lg animate-slide-up max-h-[85vh] overflow-auto">
           <div className="flex justify-center pt-3 pb-1">
-            <div className="w-10 h-1 bg-[var(--border-light)] rounded-full" />
+            <div className="w-10 h-1 bg-(--border-light) rounded-full" />
           </div>
 
           <div className="px-5 pb-2 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Settings</h2>
+            <h2 className="text-lg font-semibold text-(--text-primary)">Settings</h2>
             <button onClick={onClose} className="btn-ghost text-sm">
               Done
             </button>
