@@ -64,8 +64,13 @@ export async function GET(request: NextRequest) {
 
     const data = await response.json();
 
+    // The MTA API answers 200 with a null body for a rejected key or unknown id
+    if (!data?.data) {
+      throw new Error("MTA API returned an empty body (rejected key or unknown id)");
+    }
+
     // Extract routes from the response
-    const routes = data.data?.list || [];
+    const routes = data.data.list || [];
 
     // Map to a simpler format and filter by query if provided
     const busLines: BusLine[] = routes

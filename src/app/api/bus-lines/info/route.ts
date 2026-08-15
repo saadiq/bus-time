@@ -68,6 +68,11 @@ export async function GET(request: NextRequest) {
 
     const data = await response.json();
 
+    // The MTA API answers 200 with a null body for a rejected key or unknown id
+    if (!data) {
+      throw new Error("MTA API returned an empty body (rejected key or unknown id)");
+    }
+
     // Extract the route from the response
     const busLine: ApiRoute | undefined = data.data?.entry;
 

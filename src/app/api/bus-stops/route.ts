@@ -78,6 +78,11 @@ export async function GET(request: NextRequest) {
 
     const data: MTAApiResponse = await response.json();
 
+    // The MTA API answers 200 with a null body for a rejected key or unknown id
+    if (!data) {
+      throw new Error("MTA API returned an empty body (rejected key or unknown id)");
+    }
+
     // Check for error in the API response
     if (data.code && data.code !== 200) {
       console.error("API Error:", data.text);
