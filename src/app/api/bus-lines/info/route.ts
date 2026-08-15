@@ -47,8 +47,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Use the OneBusAway API to get a single route by ID
-    const url = `https://bustime.mta.info/api/where/route/${encodeURIComponent(lineId)}.json?key=${apiKey}`;
+    // Use the OneBusAway API to get a single route by ID.
+    // version=2 is required for the { entry, references } response shape
+    // parsed below; without it the route fields come back directly under
+    // `data` and with `agency` nested instead of a flat `agencyId`.
+    const url = `https://bustime.mta.info/api/where/route/${encodeURIComponent(lineId)}.json?key=${apiKey}&version=2`;
 
     const response = await fetch(url, {
       cache: "no-store", // Ensures the fetch is fresh when revalidation occurs
